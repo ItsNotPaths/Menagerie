@@ -1,0 +1,11 @@
+# Downloaded by download-deps.sh — not committed
+vendor/
+
+# Compiler output
+nimcache/
+nimcache-windows/
+menagerie
+menagerie.exe
+
+# Docker build output
+.dockerignore
