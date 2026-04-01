@@ -33,6 +33,7 @@ import state, content, items, api_types
 import conditions as cond
 import armor      as armormod
 import modifiers  as mods
+import skills     as sk
 
 const COMBAT_PAUSE* = "__PAUSE__"
 
@@ -62,8 +63,8 @@ proc resolveEnemyIdx(state: GameState; eid: string): int =
 
 # ── Verb: damage ──────────────────────────────────────────────────────────────
 
-proc cmdDamage(state: var GameState; sel, selfId: string;
-               amount: float; stat: string): seq[string] =
+proc cmdDamage*(state: var GameState; sel, selfId: string;
+                amount: float; stat: string): seq[string] =
   let s = if stat != "" and stat.toLowerAscii in validStats: stat.toLowerAscii
           else: "health"
   case sel
@@ -331,7 +332,68 @@ proc runCommand*(state: var GameState; cmd: string;
   of "pause":
     return @[COMBAT_PAUSE]
 
-  # give_xp, train_skill, cast — deferred to Phase 6 (skills / spells)
+  of "give_xp":
+    # give_xp <target> <amount>   (target must be "player")
+    if parts.len < 3: return
+    if parts[1].toLowerAscii != "player": return
+    var amount: float
+    try: amount = parseFloat(parts[2])
+    except: return
+    return sk.giveXp(state, amount)
+
+  of "train_skill":
+    # train_skill <target> <skill_name> <amount>
+    if parts.len < 4: return
+    if parts[1].toLowerAscii != "player": return
+    var amount: int
+    try: amount = parseInt(parts[3])
+    except: return
+    sk.trainSkill(state, parts[2].toLowerAscii, amount)
+
+  of "cast", "cast_spell":
+    # Fire a spell inline from a content proc (armor proc, effect command, etc.).
+    # No focus cost, no cooldown, no round resolution — bare damage + effects only.
+    # cast       <mode> <spell_id> <row> [dist]
+    # cast_spell <spell_id> <mode> <row> [dist]
+    if parts.len < 4: return
+    let (mode, spellId, rowIdx) =
+      if verb == "cast":      (parts[1].toLowerAscii, parts[2], 3)
+      else:                   (parts[2].toLowerAscii, parts[1], 3)
+    const castMults = [("smite", 1.0), ("beam", 0.6), ("wave", 0.35)]
+    var mult = 0.0
+    for (m, v) in castMults:
+      if m == mode: mult = v; break
+    if mult == 0.0 or not state.combat.isSome: return
+    var row, dist: int
+    try:
+      row  = parseInt(parts[rowIdx])
+      dist = if parts.len > rowIdx + 1: parseInt(parts[rowIdx + 1]) else: 0
+    except: return
+    let cs = state.combat.get
+    var targetIds: seq[string]
+    for e in cs.enemies:
+      let hit = case mode
+        of "smite": e.row == row and e.distance == dist
+        of "beam":  e.row == row
+        else:       abs(e.row - row) <= 1
+      if hit: targetIds.add e.id
+    let spDef  = content.getSpell(spellId)
+    let damage = spDef.damage * mult
+    if targetIds.len == 0:
+      result.add &"  {spellId} ({mode}) finds no targets."
+    else:
+      result.add &"  {spellId} ({mode}) [proc]:"
+      for eid in targetIds:
+        result &= cmdDamage(state, "enemy." & eid, selfId, damage, "health")
+      # Apply spell effects inline (avoids importing spells.nim → api circular dep).
+      # spells.nim applySpellEffects does the same thing via apiAddEffect hook.
+      if spDef.effects != nil and spDef.effects.kind == JArray:
+        for eff in spDef.effects:
+          let effId = eff{"effect"}.getStr
+          let ticks = eff{"ticks"}.getInt(3)
+          if effId == "": continue
+          for eid in targetIds:
+            result &= addEffect(state, "enemy." & eid, effId, ticks, eid)
 
   else: discard
 

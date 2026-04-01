@@ -5,17 +5,19 @@
 ##
 ## Call startGameThread(contentDir) from the main thread before ui.main().
 
-import std/[json, strformat, tables]
+import std/[json, os, strformat, tables]
 import state
 import content
 import world
 import clock
 import api
+import settings
 import ../commands/core
 import ../commands/cmd_world
 import ../commands/cmd_town
 import ../commands/cmd_universal
 import ../commands/cmd_inventory
+import ../commands/cmd_combat
 import ../ui/ipc
 
 
@@ -27,11 +29,11 @@ proc buildStatLines(state: GameState): seq[string] =
   @[
     &"Day: {day}  {timeOfDay(state)}",
     &"Level: {p.level}",
-    &"HP: {p.health:.0f} / {p.maxHealth:.0f}",
-    &"Stamina: {p.stamina:.0f} / {p.maxStamina:.0f}",
-    &"Focus: {p.focus:.0f} / {p.maxFocus:.0f}",
-    &"Fatigue: {p.fatigue:.0f}",
-    &"Hunger: {p.hunger:.0f}",
+    &"HP: {p.health.int} / {p.maxHealth.int}",
+    &"Stamina: {p.stamina.int} / {p.maxStamina.int}",
+    &"Focus: {p.focus.int} / {p.maxFocus.int}",
+    &"Fatigue: {p.fatigue.int}",
+    &"Hunger: {p.hunger.int}",
     &"Gold: {p.gold}",
   ]
 
@@ -40,7 +42,10 @@ proc buildStatLines(state: GameState): seq[string] =
 
 proc pushLines(lines: seq[string]) =
   for line in lines:
-    toUi.send(UiMsg(kind: umPrint, line: line))
+    if line == COMBAT_PAUSE:
+      os.sleep(settings.combatPauseMs())
+    else:
+      toUi.send(UiMsg(kind: umPrint, line: line))
 
 proc pushStats(state: GameState) =
   toUi.send(UiMsg(kind: umStats, statLines: buildStatLines(state)))
@@ -63,7 +68,8 @@ proc gameThread(contentDir: string) {.thread.} =
   # Content tables and command registry are GC'd globals, but only written
   # during this thread's own init before entering the recv loop — safe.
   {.cast(gcsafe).}:
-    # Load content and build world index
+    # Load settings and content
+    settings.loadSettings("settings.txt")
     loadContent(contentDir)
     buildWorldDefIndex()
 
@@ -72,6 +78,7 @@ proc gameThread(contentDir: string) {.thread.} =
     initCmdWorld()
     initCmdTown()
     initCmdInventory()
+    initCmdCombat()
 
     initApi()
 

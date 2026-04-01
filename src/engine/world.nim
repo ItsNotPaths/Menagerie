@@ -304,6 +304,33 @@ proc populateRoomQueue*(state: var GameState) =
     state.roomQueue.add RoomOccupant(id: npcId, label: label, kind: kind)
 
 
+# ── Combat spawn helpers ──────────────────────────────────────────────────────
+
+proc rollStartPosition*(npcRaw: JsonNode): (int, int) =
+  ## Roll an initial combat grid position from an NPC template's hint fields.
+  ## Template fields (all optional, read from npc.raw):
+  ##   starting_row / starting_distance  — fixed values, override range
+  ##   row_range      [min, max]         — random in range (default [1, 9])
+  ##   distance_range [min, max]         — random in range (default [3, 7])
+  let row =
+    if npcRaw != nil and npcRaw{"starting_row"} != nil:
+      npcRaw{"starting_row"}.getInt(5)
+    else:
+      let rng = if npcRaw != nil: npcRaw{"row_range"} else: nil
+      let lo = if rng != nil and rng.kind == JArray and rng.len >= 1: rng[0].getInt(1) else: 1
+      let hi = if rng != nil and rng.kind == JArray and rng.len >= 2: rng[1].getInt(9) else: 9
+      rand(lo..hi)
+  let dist =
+    if npcRaw != nil and npcRaw{"starting_distance"} != nil:
+      npcRaw{"starting_distance"}.getInt(5)
+    else:
+      let rng = if npcRaw != nil: npcRaw{"distance_range"} else: nil
+      let lo = if rng != nil and rng.kind == JArray and rng.len >= 1: rng[0].getInt(3) else: 3
+      let hi = if rng != nil and rng.kind == JArray and rng.len >= 2: rng[1].getInt(7) else: 7
+      rand(lo..hi)
+  (max(1, min(9, row)), max(1, min(9, dist)))
+
+
 # ── Dirty tile initialisation ─────────────────────────────────────────────────
 
 proc spawnTileEnemies(state: var GameState; tileKey: string; tileDef: TileDef; tileType: string) =
@@ -322,14 +349,15 @@ proc spawnTileEnemies(state: var GameState; tileKey: string; tileDef: TileDef; t
       let instanceId = &"{eId}_{counter}"
       let npc = content.getNpc(eId)
       let baseHealth = if npc.id != "": npc.health else: 20.0
+      let (row, dist) = rollStartPosition(if npc.id != "": npc.raw else: nil)
       state.npcStates[instanceId] = %*{
         "tile":         tileKey,
         "room":         roomId,
         "alive":        true,
         "health":       baseHealth,
         "spawned_from": eId,
-        "row":          5,
-        "distance":     5,
+        "row":          row,
+        "distance":     dist,
       }
 
 
@@ -517,6 +545,82 @@ proc leaveLocation*(state: var GameState): seq[string] =
   tileLines(state, x, y)
 
 
+proc leaveEncounterRoom*(state: var GameState): seq[string] =
+  ## Discard temporary encounter state and return player to the world map.
+  ## Removes all @encounter npc_states entries and clears encounter variables.
+  var toRemove: seq[string]
+  for k, v in state.npcStates:
+    if v.kind == JObject and v{"tile"}.getStr == "@encounter":
+      toRemove.add k
+  for k in toRemove:
+    state.npcStates.del k
+  state.variables.del "_in_encounter"
+  state.variables.del "_pending_encounter"
+  state.player.currentRoom = ""
+  state.context = ctxWorld
+  let (x, y) = state.player.position
+  tileLines(state, x, y)
+
+
+proc dropEntityLoot*(state: var GameState; entityId: string): seq[string] =
+  ## Mark entity dead in npc_states and collect loot item IDs.
+  ## Returns seq of item IDs (may contain duplicates for stacks).
+  ## Caller formats the summary line; items are appended to tile dirty state.
+  ##
+  ## Loot priority:
+  ##   1. loot_table [{item, amount, chance}] — rolled per entry
+  ##   2. inventory  [{item, amount}|string]  — all guaranteed (fallback)
+  ##
+  ## Saves flush is deferred to Phase 9.
+  if entityId in state.npcStates:
+    if state.npcStates[entityId].kind == JObject:
+      state.npcStates[entityId]["alive"] = %false
+
+  let loc    = state.npcStates.getOrDefault(entityId, newJNull())
+  let baseId = if loc.kind == JObject: loc{"spawned_from"}.getStr(entityId) else: entityId
+  let npc    = content.getNpc(baseId)
+  if npc.id == "": return
+
+  var dropped: seq[string]
+
+  let lootTable = npc.raw{"loot_table"}
+  if lootTable != nil and lootTable.kind == JArray and lootTable.len > 0:
+    for entry in lootTable:
+      if entry{"deleted"}.getBool(false): continue
+      let itemId = entry{"item"}.getStr.strip
+      let amount = max(1, entry{"amount"}.getInt(1))
+      let chance = entry{"chance"}.getInt(100)
+      if itemId != "" and rand(1..100) <= chance:
+        for _ in 1..amount: dropped.add itemId
+  else:
+    let inv = npc.raw{"inventory"}
+    if inv != nil and inv.kind == JArray:
+      for entry in inv:
+        case entry.kind
+        of JString:
+          let itemId = entry.getStr.strip
+          if itemId != "": dropped.add itemId
+        of JObject:
+          let itemId = entry{"item"}.getStr.strip
+          let amount = max(1, entry{"amount"}.getInt(1))
+          if itemId != "":
+            for _ in 1..amount: dropped.add itemId
+        else: discard
+
+  if dropped.len > 0:
+    let (x, y) = state.player.position
+    let key = &"{x}_{y}"
+    if key notin state.dirty:
+      state.dirty[key] = %*{"items": newJArray()}
+    if state.dirty[key]{"items"} == nil or state.dirty[key]{"items"}.kind != JArray:
+      state.dirty[key]["items"] = newJArray()
+    for iid in dropped:
+      state.dirty[key]["items"].add %iid
+    # TODO Phase 9: saves.flushDirty(state, key)
+
+  dropped
+
+
 proc moveToRoom*(state: var GameState; roomId: string): seq[string] =
   ## Navigate to a connected room. Returns description or error lines.
   let connections = getRoomConnections(state)
@@ -698,7 +802,7 @@ proc travelRoad*(state: var GameState; direction: string; steps: int): (seq[stri
   state.player.position = (curX, curY)
   var totalTicks = terrainTicks.getOrDefault(firstTile.tileType, 4)
 
-  lines.add &"→ {direction.capitalizeAscii}"
+  lines.add &"-> {direction.capitalizeAscii}"
 
   if firstTile.tileType in stopTileTypes:
     let name = (if firstTile.name != "": firstTile.name else: firstTile.tileType).replace("-", " ")
@@ -735,7 +839,7 @@ proc travelRoad*(state: var GameState; direction: string; steps: int): (seq[stri
     inc totalTicks, terrainTicks.getOrDefault(moveTile.tileType, 4)
 
     lines.add travelPause
-    lines.add &"→ {nextDirStr}"
+    lines.add &"-> {nextDirStr}"
 
     if moveTile.tileType in stopTileTypes:
       let name = (if moveTile.name != "": moveTile.name else: moveTile.tileType).replace("-", " ")

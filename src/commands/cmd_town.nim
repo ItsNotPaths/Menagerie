@@ -6,6 +6,7 @@
 import std/[sequtils, strformat, strutils]
 import engine/state
 import engine/world
+import engine/combat
 import commands/core
 
 
@@ -50,12 +51,13 @@ proc cmdPeekRoom(state: var GameState; args: seq[string]): CmdResult =
   ok(roomPeekLines(state, roomId))
 
 proc cmdAttackStart(state: var GameState; args: seq[string]): CmdResult =
-  ## Stub — full combat is Phase 6.
   if state.roomQueue.len == 0:
     return err("There is no one here.")
-  if state.roomQueue.anyIt(it.kind == rokEnemy):
-    return err("(Combat system not yet implemented — Phase 6)")
-  err("No hostiles here.")
+  if not state.roomQueue.anyIt(it.kind == rokEnemy):
+    return err("No hostiles here.")
+  discard initiateAggression(state)
+  result = ok(startCombat(state))
+  result.imagePath = roomImagePath(state)
 
 
 proc initCmdTown*() =

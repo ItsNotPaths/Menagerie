@@ -426,13 +426,13 @@ step in `dispatch` before the table lookup.
 > `rand(99)` in `armor.fireEffectProcs` uses default Nim RNG; call `randomize()` at game start (Phase 6 concern).
 > `std/tables` must be imported explicitly in any module that accesses `state.variables` or `state.player.armor` — not re-exported from `state.nim`.
 
-### Phase 6 — Combat
+### Phase 6 — Combat ✓
 *Goal: full spatial grid combat loop.*
 
-- [ ] `src/engine/spells.nim` — spell loading, `applySpellEffects`
-- [ ] `src/engine/skills.nim` — skill values, `skillPct`, `giveXp`, levelup picks
-- [ ] `src/engine/combat.nim` — round structure, enemy AI (action tables + conditions), resource economy, trap system, dodge token, death handling, telegraph messages
-- [ ] `src/commands/cmd_combat.nim` — `attack`, `dodge`, `block`, `pass`, `flee`, `cast`, `smite`, `beam`, `wave`, `trap`, positional commands
+- [x] `src/engine/spells.nim` — spell loading, `applySpellEffects`
+- [x] `src/engine/skills.nim` — skill values, `skillPct`, `giveXp`, levelup picks
+- [x] `src/engine/combat.nim` — round structure, enemy AI (action tables + conditions), resource economy, trap system, dodge token, death handling, telegraph messages
+- [x] `src/commands/cmd_combat.nim` — `attack`, `dodge`, `block`, `pass`, `flee`, `cast`, `smite`, `beam`, `wave`, `trap`, positional commands
 
 ### Phase 7 — Dialogue & Economy
 *Goal: NPC conversations and shops work end-to-end.*

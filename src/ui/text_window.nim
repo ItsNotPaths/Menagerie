@@ -23,10 +23,11 @@ const
   HUD_MARGIN   = 10
   HUD_PAD      = 6
   HUD_LINE_H   = 18
-  HUD_BOX_W    = 180
+  HUD_BOX_W    = 220
   TARGET_FPS   = 60
   FRAME_MS     = 1000 div TARGET_FPS
-  CURSOR_BLINK = 530  # ms
+  CURSOR_BLINK   = 530  # ms
+  SCROLL_PAD_B   = 20  # px gap between last text line and input bar
 
 # ─── Types ───────────────────────────────────────────────────────────────────
 type
@@ -91,6 +92,7 @@ type
     curArrow:  CursorPtr
     curHand:   CursorPtr
     curSizeWE: CursorPtr
+    curIBeam:  CursorPtr
 
 # ─── SDL helpers ─────────────────────────────────────────────────────────────
 template sdlCheck(call: untyped) =
@@ -246,20 +248,21 @@ proc renderScrollbar(app: var App) =
   app.ren.fillRect(sbX, thumbY, sbW, thumbH)
 
 proc renderRightPanel(app: var App) =
-  let panelX = app.sashX + SASH_W
-  let panelW = app.winW - panelX
-  let viewH  = app.winH - INPUT_H
+  let panelX  = app.sashX + SASH_W
+  let panelW  = app.winW - panelX
+  let viewH   = app.winH - INPUT_H        # input bar y / panel background height
+  let textViewH = viewH - SCROLL_PAD_B   # usable height for scrollback text
 
   app.ren.setColor(COL_BG)
   app.ren.fillRect(panelX, 0, panelW, viewH)
 
-  # clip scrollback to panel bounds
-  var clip = rect(panelX.cint, 0, panelW.cint, viewH.cint)
+  # clip scrollback to panel bounds (with bottom padding)
+  var clip = rect(panelX.cint, 0, panelW.cint, textViewH.cint)
   discard app.ren.setClipRect(clip.addr)
 
   let startLine = max(0, app.buf.scrollY div app.lineH)
   let endLine   = min(app.buf.lines.high,
-                      (app.buf.scrollY + viewH) div app.lineH + 1)
+                      (app.buf.scrollY + textViewH) div app.lineH + 1)
 
   for li in startLine .. endLine:
     if li >= app.buf.lines.len: break
@@ -396,7 +399,7 @@ proc submitInput(app: var App) =
   let cmd = app.inputText.strip()
   app.buf.addLine("> " & cmd)
   app.buf.recomputeHeight(app.lineH)
-  app.buf.scrollToBottom(app.winH - INPUT_H)
+  app.buf.scrollToBottom(app.winH - INPUT_H - SCROLL_PAD_B)
   toGame.send(GameMsg(kind: gmInput, raw: cmd))
   app.inputText   = ""
   app.inputCursor = 0
@@ -464,6 +467,7 @@ proc main*() =
   app.curArrow  = createSystemCursor(SDL_SYSTEM_CURSOR_ARROW)
   app.curHand   = createSystemCursor(SDL_SYSTEM_CURSOR_HAND)
   app.curSizeWE = createSystemCursor(SDL_SYSTEM_CURSOR_SIZEWE)
+  app.curIBeam  = createSystemCursor(SDL_SYSTEM_CURSOR_IBEAM)
 
   # Content loading and welcome messages are handled by the game thread.
 
@@ -505,7 +509,7 @@ proc main*() =
       of umRenderSprites: discard
     if dirtyBuf:
       app.buf.recomputeHeight(app.lineH)
-      app.buf.scrollToBottom(app.winH - INPUT_H)
+      app.buf.scrollToBottom(app.winH - INPUT_H - SCROLL_PAD_B)
 
     while pollEvent(ev):
       case ev.kind
@@ -521,7 +525,7 @@ proc main*() =
           app.sashX = clamp(app.sashX, 200, app.winW - 200)
           app.recomputeBgRect()
           app.buf.recomputeHeight(app.lineH)
-          app.buf.scrollToBottom(app.winH - INPUT_H)
+          app.buf.scrollToBottom(app.winH - INPUT_H - SCROLL_PAD_B)
 
       of MouseMotion:
         let mx = ev.motion.x.int
@@ -534,6 +538,7 @@ proc main*() =
           setCursor:
             if app.hoverLink.len > 0: app.curHand
             elif mx >= app.sashX and mx < app.sashX + SASH_W: app.curSizeWE
+            elif my >= app.winH - INPUT_H: app.curIBeam
             else: app.curArrow
           if app.selecting:
             app.selEnd       = app.anchorFromMouse(mx, my)
@@ -570,7 +575,7 @@ proc main*() =
       of MouseWheel:
         let delta = ev.wheel.y.int * app.lineH * 3
         app.buf.scrollY = clamp(app.buf.scrollY - delta,
-                                0, max(0, app.buf.totalH - (app.winH - INPUT_H)))
+                                0, max(0, app.buf.totalH - (app.winH - INPUT_H - SCROLL_PAD_B)))
 
       of TextInput:
         let s = $cast[cstring](ev.text.text[0].unsafeAddr)
@@ -620,10 +625,10 @@ proc main*() =
         of K_HOME: app.inputCursor = 0
         of K_END:  app.inputCursor = app.inputText.len
         of K_PAGEUP:
-          app.buf.scrollY = max(0, app.buf.scrollY - (app.winH - INPUT_H))
+          app.buf.scrollY = max(0, app.buf.scrollY - (app.winH - INPUT_H - SCROLL_PAD_B))
         of K_PAGEDOWN:
-          app.buf.scrollY = min(max(0, app.buf.totalH - (app.winH - INPUT_H)),
-                                app.buf.scrollY + (app.winH - INPUT_H))
+          app.buf.scrollY = min(max(0, app.buf.totalH - (app.winH - INPUT_H - SCROLL_PAD_B)),
+                                app.buf.scrollY + (app.winH - INPUT_H - SCROLL_PAD_B))
         of K_c:
           if ctrl and app.hasSelection:
             discard setClipboardText(app.selectionText().cstring)
