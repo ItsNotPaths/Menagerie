@@ -14,6 +14,7 @@ type
   ItemDef* = object
     id*, displayName*, itemType*, description*: string
     slotCost*, value*, damage*, staminaCost*:   int
+    extraSlots*, staminaReq*:                   int   ## container fields
     canEquip*:                                  bool
     effects*:                                   seq[string]   ## command strings
 
@@ -73,10 +74,13 @@ type
     raw*:              JsonNode   ## actions array
 
   WorldTile* = object
-    x*, y*:    int
-    tileType*: string   ## "town" | "road" | "dungeon" | "crossroads" | "wilderness"
-    name*:     string   ## named locations (towns, dungeons); "" for anonymous tiles
-    tile*:     string   ## tile def id for locations; "" for plain terrain
+    x*, y*:       int
+    tileType*:    string   ## "town" | "road" | "dungeon" | "crossroads" | "ruin" | terrain
+    name*:        string   ## named location name; "" for anonymous tiles
+    tile*:        string   ## tile def id for locations; "" for plain terrain
+    description*: string   ## custom description override
+    image*:       string   ## custom image filename override
+    deleted*:     bool     ## soft-deleted in world_def export — skip on load
 
   WorldDef* = object
     worldSeed*: int
@@ -136,6 +140,8 @@ proc loadItems(dir: string) =
       value:       d{"value"}.getInt(0),
       damage:      d{"damage"}.getInt(0),
       staminaCost: d{"stamina_cost"}.getInt(0),
+      extraSlots:  d{"extra_slots"}.getInt(0),
+      staminaReq:  d{"stamina_req"}.getInt(0),
       canEquip:    d{"can_equip"}.getBool(false),
       effects:     strSeq(d{"effects"}),
     )
@@ -283,11 +289,14 @@ proc loadWorldDef(dir: string) =
   if d.hasKey("tiles") and d["tiles"].kind == JArray:
     for t in d["tiles"]:
       worldDef.tiles.add WorldTile(
-        x:        t{"x"}.getInt(0),
-        y:        t{"y"}.getInt(0),
-        tileType: t{"type"}.getStr,
-        name:     t{"name"}.getStr,
-        tile:     t{"tile"}.getStr,
+        x:           t{"x"}.getInt(0),
+        y:           t{"y"}.getInt(0),
+        tileType:    t{"type"}.getStr,
+        name:        t{"name"}.getStr,
+        tile:        t{"tile"}.getStr,
+        description: t{"description"}.getStr,
+        image:       t{"image"}.getStr,
+        deleted:     t{"deleted"}.getBool(false),
       )
 
 proc loadAssetIndex(dir: string) =

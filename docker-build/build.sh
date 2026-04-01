@@ -50,6 +50,7 @@ echo ""
 echo "==> Copying to release directory..."
 mkdir -p "$RELEASE_DIR"
 cp "$PROJECT_DIR/$BINARY" "$RELEASE_DIR/$BINARY"
+cp -r "$PROJECT_DIR/content" "$RELEASE_DIR/content"
 cp -r "$PROJECT_DIR/data" "$RELEASE_DIR/data"
 
 echo ""

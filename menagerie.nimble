@@ -1,8 +1,8 @@
 # Package
 version       = "0.1.0"
-author        = "paths"
+author        = "Paths"
 description   = "Menagerie - SDL2 UI"
-license       = "MIT"
+license       = "GPL v3.0"
 srcDir        = "src"
 bin           = @["menagerie"]
 

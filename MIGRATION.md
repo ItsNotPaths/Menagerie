@@ -15,6 +15,10 @@ The current Nim prototype (`src/`) provides a working SDL2 shell:
 | `src/ui/text_window.nim` | SDL2 window, split-panel layout, text render, mouse/keyboard | `ui/text_window.py` |
 | `src/ui/ipc.nim` | Queue bridge placeholder | `ui/ipc.py` |
 | `src/engine/scripting.nim` | Embedded Lua 5.4 (static, no deps) | `engine/scripts.py` |
+| `src/engine/state.nim` | All game state types | `engine/state.py` |
+| `src/engine/gameplay_vars.nim` | `gameplay_vars.json` loader, `gvFloat`/`gvInt` | `engine/gameplay_vars.py` |
+| `src/engine/variables.nim` | `evalConditions`, `applyChanges` | `engine/variables.py` |
+| `src/engine/content.nim` | Startup content loader for all JSON types | *(new)* |
 
 The SDL2 shell already handles:
 - Resizable split-panel layout (sash drag)
@@ -351,38 +355,58 @@ step in `dispatch` before the table lookup.
 > After Phase 3 the game is playable end-to-end (move + look), even if most
 > content is stub output. All later phases add depth without breaking the loop.
 
-### Phase 1 — State & Content Loading
+### Phase 1 — State & Content Loading ✓ DONE 2026-03-31
 *Goal: compile and load all JSON content into typed structures.*
 
-- [ ] `src/engine/state.nim` — all game state types (see §4)
-- [ ] `src/engine/gameplay_vars.nim` — load `gameplay_vars.json`, typed getters
-- [ ] `src/engine/variables.nim` — `evalConditions`, `applyChanges` (pure functions, no state)
-- [ ] `src/engine/content.nim` — load all content types: items, spells, effects/perks, NPCs, rooms, tiles, armor_plates, shops, AI packages, quests, economic_events, world_def, asset_index; merge individual files + Inkwell plugin bundles into same tables
-- [ ] Verify all content files parse without errors
+- [x] `src/engine/state.nim` — all game state types (see §4)
+- [x] `src/engine/gameplay_vars.nim` — load `gameplay_vars.json`, typed getters
+- [x] `src/engine/variables.nim` — `evalConditions`, `applyChanges` (pure functions, no state)
+- [x] `src/engine/content.nim` — load all content types: items, spells, effects/perks, NPCs, rooms, tiles, armor_plates, shops, AI packages, quests, world_def, asset_index
+- [x] Verify all content files parse without errors — `src/test_phase1.nim` smoke-tested against real content
 
-### Phase 2 — World & Clock
+> **Notes:** Nim forbids leading `_` in identifiers (renamed `_data` → `gvData`).
+> `economic_events` content type not yet present in content/ — skipped for now.
+> `src/test_phase1.nim` uses a hardcoded content path; remove before shipping.
+
+### Phase 2 — World & Clock ✓ DONE 2026-03-31
 *Goal: player can move around the world map and enter locations (console output).*
 
-- [ ] `src/engine/clock.nim` — tick system, time-of-day, fatigue/hunger drain, stat regen, effective stat caps
-- [ ] `src/engine/world.nim` — procedural + hand-placed tile generation (seed from `variables["world_seed"]`), room loading, asset resolution, NPC schedule, dirty tile lazy-load, room queue rebuild
-- [ ] `src/commands/core.nim` — registry, dispatch, alias expansion
-- [ ] `src/commands/cmd_world.nim` — `go`, `look`, `survey`, `camp`, `wait`
-- [ ] `src/commands/cmd_town.nim` — `go`, `look`, `enter`, `sleep`
-- [ ] `src/commands/cmd_universal.nim` — `help`, `wait`
+- [x] `src/engine/clock.nim` — tick system, time-of-day, fatigue/hunger drain, stat regen, effective stat caps
+- [x] `src/engine/world.nim` — procedural + hand-placed tile generation (seed from `variables["world_seed"]`), room loading, asset resolution, NPC schedule, dirty tile lazy-load, room queue rebuild
+- [x] `src/commands/core.nim` — registry, dispatch, alias expansion
+- [x] `src/commands/cmd_world.nim` — `go`, `look`, `survey`, `enter`, `travel`, `peek`
+- [x] `src/commands/cmd_town.nim` — `look`, `move`, `leave`, `peek`, `attack` (stub)
+- [x] `src/commands/cmd_universal.nim` — `help`, `wait`, `sleep`, `status`
+- [x] Verified with `src/test_phase2.nim` — compiles and runs against real content
 
-### Phase 3 — IPC & Game Loop
+> **Notes:** `content/` moved into Nim project directory (no longer shared with Python).
+> `buildWorldDefIndex()` must be called after `loadContent()`.
+> `WorldTile` extended with `description`, `image`, `deleted` fields.
+> `NPC schedule resolution` and `room queue rebuild` implemented; combat stub in place.
+> `camp` command not present in Python source — omitted.
+
+### Phase 3 — IPC & Game Loop ✓ DONE 2026-03-31
 *Goal: game logic on background thread; SDL2 shell driven by real engine.*
 
-- [ ] `src/ui/ipc.nim` — typed channels (see §6); compile with `--mm:orc` (required for heap types across threads)
-- [ ] `src/engine/game_loop.nim` — daemon thread, `dispatch` loop, `_push` (send lines + image + sprites + 8-line HUD stats), dynamic stat lines replacing current hardcoded HUD
-- [ ] Connect `text_window.nim` input bar → `toGame`; poll `toUi` each frame
-- [ ] Wire `LOAD_LOCATION` + `RENDER_SPRITES` so left panel updates on room enter
+- [x] `src/ui/ipc.nim` — typed channels (`UiMsg`/`GameMsg` variants); `--mm:orc` via nim.cfg
+- [x] `src/engine/game_loop.nim` — daemon thread, dispatch loop, `pushResult` (lines + image + 8-line HUD)
+- [x] `text_window.nim` input bar → `toGame`; poll `toUi` each frame; Lua removed
+- [x] `LOAD_LOCATION` wired — left panel updates on `umLoadLocation` messages
 
-### Phase 4 — Inventory & Items
+> **Notes:** `dynlibOverride` removed from dev nim.cfg — SDL2_ttf/SDL2_image load via dlopen
+> in the distrobox dev build (static linking of SDL2_ttf/image caused unresolvable WebP/SDL
+> symbol ordering issues with GCC 14 on this system). Docker release build (docker-build/nim.cfg)
+> should re-add `dynlibOverride` with `--start-group`/`--end-group` and `-lstdc++`.
+> `path = "src"` added to nim.cfg so all modules can use absolute imports from project root.
+> Game thread uses `{.cast(gcsafe).}` to assert safety of read-only content table access.
+
+### Phase 4 — Inventory & Items ✓ DONE 2026-03-31
 *Goal: player can pick up, equip, drop, and use items.*
 
-- [ ] `src/engine/items.nim` — `giveItem`, `takeItem`, `hasItem`, `countItem`, inventory queries, container slots
-- [ ] `src/commands/cmd_inventory.nim` — `equip`, `unequip`, `drop`, `use`, `inventory`
+- [x] `src/engine/items.nim` — `giveItem`, `takeItem`, `hasItem`, `countItem`, `countAvailable`, container slot queries, `dropOverflowItems`
+- [x] `src/commands/cmd_inventory.nim` — `inventory` (top-level, category, item detail), `equip`, `unequip`, `consume`, `favourite_item`, `unfavourite_item`
+
+> **Notes:** `ItemInfo` unified lookup across `content.items` and `content.armorPlates` via `anyItem()`. Equippable items stored as individual inventory entries; consumables/materials stack. Container stamina budget enforced on equip.
 
 ### Phase 5 — Effects, Conditions, Modifiers
 *Goal: status effects tick down; perks fire events.*
@@ -604,4 +628,56 @@ gameplay_vars) is pure JSON with no Python-specific syntax — load as-is.
 
 ---
 
-*Last updated: 2026-03-31 (reviewed)*
+## 13. Known Pain Points (fix after rewrite is solid)
+
+### 13.1 Misleading `[[label:command]]` links
+
+Links should be terminal-friendly: the label should match what a user would type.
+Goal is that a terminal-only mode works without the player having to guess hidden command names.
+
+Offenders in `src/engine/world.nim` (sneak block):
+
+| Current | Problem | Fix |
+|---|---|---|
+| `[[start:attack]]` | `start` means nothing; command is `attack` | `[[attack:attack]]` |
+| `[[move:sneak move]]` | label hides that it sends `sneak move` | `[[sneak move:sneak move]]` |
+| `[[stealth attack:stealth_attack]]` | spaces in label hide the real command | `[[stealth_attack:stealth_attack]]` or rename cmd to `stealth_attack` accepting no args |
+| `[[leave sneak:sneak]]` | label implies a two-word command; real command is `sneak` (toggle) | `[[sneak:sneak]]` |
+
+**Proposed fix for terminal mode:** a small `(label, command) → display` override table in the terminal renderer. Keying on the pair (not label alone) avoids false positives with unrelated links that share a label word (e.g. room nav links whose label happens to be "move").
+
+```nim
+const terminalLabelFix = {
+  ("start",          "attack"):        "attack",
+  ("move",           "sneak move"):    "sneak move",
+  ("leave sneak",    "sneak"):         "sneak",
+  ("stealth attack", "stealth_attack"):"stealth_attack",
+}.toTable
+```
+
+Terminal renderer prints `cmd ('label override')` when a pair hits the table; falls back to plain label otherwise. Entirely contained in the renderer — no command or link generation code changes needed.
+
+Minor in `src/commands/cmd_inventory.nim`:
+- `[[Equip:equip container {id}]]` and `[[Unequip:unequip container {id}]]` — label hides the id and `container` keyword. Acceptable for now since the item detail panel provides context, but a terminal user still needs to know the full syntax.
+- `[[favourite:favourite_item {id}]]` / `[[unfavourite:unfavourite_item {id}]]` — label and command name diverge. Consider renaming the commands to `favourite` / `unfavourite` (with item id as arg).
+
+### 13.2 `api.nim` not yet written — one known wrong call
+
+`api.py` is a second dispatcher for *content-authored command strings* (effect `tick_commands`, spell `on_hit_commands`, item `effects`, armor proc commands, etc.). These strings look like `damage player 20` or `add_effect player poison 5`. They are **not** player input — they're engine-internal calls routed through their own mini-dispatcher to avoid circular imports with the player command system.
+
+`api.nim` is intentionally deferred until Phase 5/6 when conditions, armor, and spells are written (they're the main callers). The dependency order is:
+
+```
+api.nim depends on: items, armor, spells, conditions, modifiers, skills, scripting
+conditions.nim depends on: api  ← mutual, needs forward ref or split
+```
+
+**Known wrong call (fix when api.nim is written):**
+
+`src/commands/cmd_inventory.nim` — `cmdConsume` calls `dispatch(cmdStr, state)` for item effect strings. `dispatch` routes through the *player* command registry — a string like `damage player 10` will silently fail because no player command named `damage` is registered. Fix: replace with `api.runCommand(cmdStr, state)` once `api.nim` exists.
+
+No other api-level logic has leaked into other modules yet — the systems that need it (conditions, armor procs, spell on-hit) haven't been written.
+
+---
+
+*Last updated: 2026-03-31 — Phase 4 complete*

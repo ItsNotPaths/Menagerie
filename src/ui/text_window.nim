@@ -2,7 +2,7 @@ import sdl2
 import sdl2/ttf
 import sdl2/image
 import strutils, unicode, os, math
-import ../engine/scripting
+import ipc
 
 # ─── Palette ────────────────────────────────────────────────────────────────
 const
@@ -84,11 +84,8 @@ type
     # hover link
     hoverLink: string
 
-    # HUD stats (label, value) pairs
+    # HUD stats (label, value) pairs — updated via umStats messages
     hudStats: seq[(string, string)]
-
-    # scripting
-    scriptEng: ScriptEngine
 
     # system cursors (created once, reused every frame)
     curArrow:  CursorPtr
@@ -191,7 +188,9 @@ proc selectionText(app: App): string =
   if not app.hasSelection: return ""
   var a = app.selStart
   var b = app.selEnd
-  if a.lineIdx > b.lineIdx or (a.lineIdx == b.lineIdx and a.spanIdx > b.spanIdx):
+  if a.lineIdx > b.lineIdx or
+     (a.lineIdx == b.lineIdx and a.spanIdx > b.spanIdx) or
+     (a.lineIdx == b.lineIdx and a.spanIdx == b.spanIdx and a.charIdx > b.charIdx):
     swap(a, b)
   for li in a.lineIdx .. b.lineIdx:
     if li >= app.buf.lines.len: break
@@ -275,14 +274,25 @@ proc renderRightPanel(app: var App) =
         var sa = app.selStart
         var sb = app.selEnd
         if sa.lineIdx > sb.lineIdx or
-           (sa.lineIdx == sb.lineIdx and sa.charIdx > sb.charIdx):
+           (sa.lineIdx == sb.lineIdx and sa.spanIdx > sb.spanIdx) or
+           (sa.lineIdx == sb.lineIdx and sa.spanIdx == sb.spanIdx and
+            sa.charIdx > sb.charIdx):
           swap(sa, sb)
         let inSel =
           (li > sa.lineIdx or (li == sa.lineIdx and si >= sa.spanIdx)) and
           (li < sb.lineIdx or (li == sb.lineIdx and si <= sb.spanIdx))
         if inSel:
-          app.ren.setColor(COL_SEL)
-          app.ren.fillRect(cx, lineY, sw, app.lineH)
+          let isSaSpan = li == sa.lineIdx and si == sa.spanIdx
+          let isSbSpan = li == sb.lineIdx and si == sb.spanIdx
+          let hx = if isSaSpan:
+            cx + textWidth(app.font, span.text[0 ..< min(sa.charIdx, span.text.len)])
+          else: cx
+          let hend = if isSbSpan:
+            cx + textWidth(app.font, span.text[0 ..< min(sb.charIdx, span.text.len)])
+          else: cx + sw
+          if hend > hx:
+            app.ren.setColor(COL_SEL)
+            app.ren.fillRect(hx, lineY, hend - hx, app.lineH)
 
       discard app.ren.renderText(app.font, span.text, cx, lineY,
                                   if span.isLink: COL_FG_LINK else: COL_FG)
@@ -385,14 +395,12 @@ proc submitInput(app: var App) =
   if app.inputText.len == 0: return
   let cmd = app.inputText.strip()
   app.buf.addLine("> " & cmd)
-  # Lua on_command handles all game commands; returns false if unrecognised
-  if not app.scriptEng.callGlobal("on_command", [cmd]):
-    app.buf.addLine("Nothing happens.")
+  app.buf.recomputeHeight(app.lineH)
+  app.buf.scrollToBottom(app.winH - INPUT_H)
+  toGame.send(GameMsg(kind: gmInput, raw: cmd))
   app.inputText   = ""
   app.inputCursor = 0
   app.inputScroll = 0
-  app.buf.recomputeHeight(app.lineH)
-  app.buf.scrollToBottom(app.winH - INPUT_H)
 
 proc handleLinkClick(app: var App; cmd: string) =
   app.inputText   = cmd
@@ -451,41 +459,13 @@ proc main*() =
     winH:       768,
     sashX:      800,
     showCursor: true,
-    hudStats: @[
-      ("Day",     "3  08:42"),
-      ("HP",      "18 / 20"),
-      ("Stamina", "12 / 15"),
-      ("Focus",   "8 / 10"),
-      ("Food",    "Satisfied"),
-      ("Gold",    "42"),
-    ],
   )
 
   app.curArrow  = createSystemCursor(SDL_SYSTEM_CURSOR_ARROW)
   app.curHand   = createSystemCursor(SDL_SYSTEM_CURSOR_HAND)
   app.curSizeWE = createSystemCursor(SDL_SYSTEM_CURSOR_SIZEWE)
 
-  let dataDir = getAppDir() / "data" / "base-game"
-
-  let imgPath = dataDir / "assets" / "test-assets" / "rooms" / "town-square.png"
-  if fileExists(imgPath): app.loadBgImage(imgPath)
-  app.recomputeBgRect()
-
-  # Load Lua scripts — all share a single persistent state
-  app.scriptEng.initScriptEngine(proc(msg: string) = app.buf.addLine(msg))
-  let scriptsDir = dataDir / "scripts"
-  for f in ["test.lua", "testy.lua"]:
-    let p = scriptsDir / f
-    if fileExists(p): discard app.scriptEng.runFile(p)
-
-  # Initial scrollback content is driven by Lua (on_start) if defined,
-  # falling back to a static welcome message
-  if not app.scriptEng.callGlobal("on_start"):
-    app.buf.addLine("Welcome to Menagerie.")
-    app.buf.addLine("")
-    app.buf.addLine("Type [[help]] or click a link to begin.")
-  app.buf.recomputeHeight(app.lineH)
-  app.buf.scrollToBottom(app.winH - INPUT_H)
+  # Content loading and welcome messages are handled by the game thread.
 
   var
     running = true
@@ -497,6 +477,35 @@ proc main*() =
     if nowTick - app.cursorBlink >= CURSOR_BLINK.uint32:
       app.showCursor  = not app.showCursor
       app.cursorBlink = nowTick
+
+    # ── Poll messages from the game thread ───────────────────────────────────
+    var dirtyBuf = false
+    while true:
+      let (avail, msg) = toUi.tryRecv()
+      if not avail: break
+      case msg.kind
+      of umPrint:
+        app.buf.addLine(msg.line)
+        dirtyBuf = true
+      of umLoadLocation:
+        app.loadBgImage(msg.imgPath)
+        app.recomputeBgRect()
+      of umStats:
+        app.hudStats = @[]
+        for s in msg.statLines:
+          let i = s.find(": ")
+          if i >= 0: app.hudStats.add (s[0 ..< i], s[i + 2 .. ^1])
+          else:      app.hudStats.add (s, "")
+      of umPanelReplace:
+        for line in msg.replaceLines: app.buf.addLine(line)
+        dirtyBuf = true
+      of umPanelAppend:
+        for line in msg.appendLines: app.buf.addLine(line)
+        dirtyBuf = true
+      of umRenderSprites: discard
+    if dirtyBuf:
+      app.buf.recomputeHeight(app.lineH)
+      app.buf.scrollToBottom(app.winH - INPUT_H)
 
     while pollEvent(ev):
       case ev.kind
@@ -632,7 +641,6 @@ proc main*() =
     if elapsed < FRAME_MS.uint32:
       delay(FRAME_MS.uint32 - elapsed)
 
-  app.scriptEng.closeScriptEngine()
   if app.bgTex != nil: destroyTexture(app.bgTex)
   font.close()
   ttf.ttfQuit()

@@ -1,5 +1,6 @@
 # Downloaded by download-deps.sh — not committed
 vendor/
+content/
 
 # Compiler output
 nimcache/
