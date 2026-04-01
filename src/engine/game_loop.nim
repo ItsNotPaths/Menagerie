@@ -18,6 +18,7 @@ import ../commands/cmd_town
 import ../commands/cmd_universal
 import ../commands/cmd_inventory
 import ../commands/cmd_combat
+import ../commands/cmd_dialogue
 import ../ui/ipc
 
 
@@ -79,6 +80,7 @@ proc gameThread(contentDir: string) {.thread.} =
     initCmdTown()
     initCmdInventory()
     initCmdCombat()
+    initCmdDialogue()
 
     initApi()
 

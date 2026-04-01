@@ -323,6 +323,7 @@ proc renderRightPanel(app: var App) =
   app.ren.setColor(COL_SASH)
   app.ren.fillRect(panelX, iy, panelW, 1)
 
+  # inpur bar entry symbol
   let promptW = app.ren.renderText(app.font, ">", panelX + TEXT_PAD, iy + 7, COL_FG_DIM)
   let inputX  = panelX + TEXT_PAD + promptW + 6
   let inputW  = panelW - TEXT_PAD * 2 - promptW - 6 - 36
@@ -333,6 +334,7 @@ proc renderRightPanel(app: var App) =
                               inputX - app.inputScroll, iy + 7, COL_FG)
   discard app.ren.setClipRect(nil)
 
+  # <enter> tag
   if app.showCursor:
     let curX = inputX + textWidth(app.font, app.inputText[0 ..< app.inputCursor]) -
                app.inputScroll
@@ -340,7 +342,7 @@ proc renderRightPanel(app: var App) =
       app.ren.setColor(COL_CURSOR)
       app.ren.fillRect(curX, iy + 5, 2, app.fontH)
 
-  discard app.ren.renderText(app.font, "⏎", app.winW - 30, iy + 7, COL_FG_DIM)
+  discard app.ren.renderText(app.font, "<enter>", app.winW - 75, iy + 7, COL_FG_DIM)
 
 proc renderSash(app: var App; hot: bool) =
   app.ren.setColor(if hot: COL_SASH_HOT else: COL_SASH)

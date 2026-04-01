@@ -433,14 +433,26 @@ step in `dispatch` before the table lookup.
 - [x] `src/engine/skills.nim` — skill values, `skillPct`, `giveXp`, levelup picks
 - [x] `src/engine/combat.nim` — round structure, enemy AI (action tables + conditions), resource economy, trap system, dodge token, death handling, telegraph messages
 - [x] `src/commands/cmd_combat.nim` — `attack`, `dodge`, `block`, `pass`, `flee`, `cast`, `smite`, `beam`, `wave`, `trap`, positional commands
+- [x] `src/engine/settings.nim` — `loadSettings`, `combatPauseMs`/`travelPauseMs` helpers; pause sentinel handled in `game_loop.pushLines`
 
-### Phase 7 — Dialogue & Economy
+> **Notes:** `HandlerProc` is `{.nimcall.}` — closures cannot satisfy it; aux spell commands (push/pull/scatter/pin/swap/bind) must be explicit top-level procs, not a factory closure.
+> Enemy effect ticking uses copy-modify-replace per enemy by ID: extract effects to local var, call `cond.tickEffects`, find enemy by ID in `state.combat`, write back.
+> `startCombat` uses `content.getNpc` (not `dialogue.loadNpc`) — Phase 7 will add the dialogue layer on top.
+> `weapon_skill` field not in typed `ItemDef`; `getEquippedWeaponSkill` returns `"longblade"` as default — revisit when weapon types are fleshed out.
+> SpaceMono font is missing box-drawing (`─`) and arrow (`→`) glyphs; all game output uses plain ASCII equivalents (`--`, `->`).
+> `:.0f` format in Nim strformat produces `"50."` (decimal point retained); use `.int` cast for clean integer display.
+
+### Phase 7 — Dialogue & Economy ✓ DONE 2026-04-01
 *Goal: NPC conversations and shops work end-to-end.*
 
-- [ ] `src/engine/dialogue.nim` — `openDialogue`, `selectTopic`, `endDialogue`, link token conversion, opening conditions
-- [ ] `src/engine/economy.nim` — `openShop`, `buyTrade`, `sellItem`, mercantile scaling, economic events
-- [ ] `src/commands/cmd_dialogue.nim` — `talk`, `say`, `farewell`
-- [ ] `src/commands/cmd_economy.nim` — `shop`, `buy`, `sell`
+- [x] `src/engine/dialogue.nim` — `openDialogue`, `selectTopic`, `endDialogue`, link token conversion, opening conditions
+- [x] `src/engine/economy.nim` — `openShop`, `shopLines`, `shopCategoryLines`, `buyTrade`, `sellItem`, mercantile scaling, economic event stub
+- [x] `src/commands/cmd_dialogue.nim` — `talk`, `say`, `farewell`, `shop`, `buy`, `sell` (all economy commands live here, matching Python layout)
+
+> **Notes:** `shop`/`buy`/`sell`/`say`/`farewell`/`bye` registered as `registerAny` hidden — active in any context so stale dialogue links still resolve.
+> Economic events not yet authored in content; `adjustedCost` falls back to base cost (tags not present in typed `ItemDef` — extend when content adds them).
+> `dialogue.nim` uses `std/re` (`replacef`) for link rewriting — NPC raw JSON accessed via `npc.raw{"topics"}`.
+> `economy.nim` reads shop trades directly from `content.shops[id].raw{"items"}` (no typed trade struct needed).
 
 ### Phase 8 — Stealth & Scripting
 *Goal: sneak mode works; Lua scripts drive content events.*
@@ -691,4 +703,4 @@ No other api-level logic has leaked into other modules yet — the systems that 
 
 ---
 
-*Last updated: 2026-04-01 — Phase 5 complete*
+*Last updated: 2026-04-01 — Phase 7 complete*
