@@ -1,7 +1,7 @@
 import sdl2
 import sdl2/ttf
 import sdl2/image
-import strutils, unicode, os, math
+import strutils, unicode, math
 import ipc
 
 # ─── Palette ────────────────────────────────────────────────────────────────
@@ -168,7 +168,7 @@ proc anchorFromMouse(app: App; mx, my: int): SelectionAnchor =
   let ry = my + app.buf.scrollY
   let lineIdx = clamp(ry div app.lineH, 0, app.buf.lines.high)
   let line = app.buf.lines[lineIdx]
-  var cx = app.sashX + SASH_W + TEXT_PAD
+  var cx = TEXT_PAD
   var spanIdx, charIdx = 0
   block outer:
     for si, span in line:
@@ -209,35 +209,11 @@ proc selectionText(app: App): string =
     if li < b.lineIdx: result.add "\n"
 
 # ─── Rendering ───────────────────────────────────────────────────────────────
-proc renderLeftPanel(app: var App) =
-  app.ren.setColor(COL_BG)
-  app.ren.fillRect(0, 0, app.sashX, app.winH)
-
-  if app.bgTex != nil:
-    var dst = app.bgRect
-    discard app.ren.copy(app.bgTex, nil, dst.addr)
-
-  if app.hudStats.len > 0:
-    let boxH = HUD_PAD * 2 + app.hudStats.len * HUD_LINE_H
-    app.ren.setColor((r: 17u8, g: 17u8, b: 17u8, a: 220u8))
-    discard app.ren.setDrawBlendMode(BlendMode_Blend)
-    app.ren.fillRect(HUD_MARGIN, HUD_MARGIN, HUD_BOX_W, boxH)
-    discard app.ren.setDrawBlendMode(BlendMode_None)
-    app.ren.setColor(COL_SASH)
-    var box = rect(HUD_MARGIN.cint, HUD_MARGIN.cint, HUD_BOX_W.cint, boxH.cint)
-    discard app.ren.drawRect(box.addr)
-    for i, (label, val) in app.hudStats:
-      let ty = HUD_MARGIN + HUD_PAD + i * HUD_LINE_H
-      let lw = app.ren.renderText(app.font, label & ": ",
-                                  HUD_MARGIN + HUD_PAD, ty, COL_FG_DIM)
-      discard app.ren.renderText(app.font, val,
-                                  HUD_MARGIN + HUD_PAD + lw, ty, COL_FG)
-
 proc renderScrollbar(app: var App) =
   let viewH = app.winH - INPUT_H
   if app.buf.totalH <= viewH: return
   let sbW    = 6
-  let sbX    = app.winW - sbW - 2
+  let sbX    = app.sashX - sbW - 2
   let trackH = viewH - 4
   let thumbH = max(20, trackH * viewH div app.buf.totalH)
   let thumbY = 2 + (trackH - thumbH) * app.buf.scrollY div
@@ -247,17 +223,16 @@ proc renderScrollbar(app: var App) =
   app.ren.setColor(COL_SASH)
   app.ren.fillRect(sbX, thumbY, sbW, thumbH)
 
-proc renderRightPanel(app: var App) =
-  let panelX  = app.sashX + SASH_W
-  let panelW  = app.winW - panelX
-  let viewH   = app.winH - INPUT_H        # input bar y / panel background height
-  let textViewH = viewH - SCROLL_PAD_B   # usable height for scrollback text
+proc renderLeftPanel(app: var App) =
+  ## Left panel: text scrollback + input bar.
+  let panelW    = app.sashX
+  let viewH     = app.winH - INPUT_H
+  let textViewH = viewH - SCROLL_PAD_B
 
   app.ren.setColor(COL_BG)
-  app.ren.fillRect(panelX, 0, panelW, viewH)
+  app.ren.fillRect(0, 0, panelW, viewH)
 
-  # clip scrollback to panel bounds (with bottom padding)
-  var clip = rect(panelX.cint, 0, panelW.cint, textViewH.cint)
+  var clip = rect(0, 0, panelW.cint, textViewH.cint)
   discard app.ren.setClipRect(clip.addr)
 
   let startLine = max(0, app.buf.scrollY div app.lineH)
@@ -267,12 +242,11 @@ proc renderRightPanel(app: var App) =
   for li in startLine .. endLine:
     if li >= app.buf.lines.len: break
     let lineY = li * app.lineH - app.buf.scrollY
-    var cx = panelX + TEXT_PAD
+    var cx = TEXT_PAD
 
     for si, span in app.buf.lines[li]:
       let sw = textWidth(app.font, span.text)
 
-      # selection highlight
       if app.hasSelection:
         var sa = app.selStart
         var sb = app.selEnd
@@ -301,14 +275,12 @@ proc renderRightPanel(app: var App) =
                                   if span.isLink: COL_FG_LINK else: COL_FG)
 
       if span.isLink:
-        # underline
         app.ren.setColor(COL_FG_LINK)
-        app.ren.fillRect(cx, lineY + app.lineH - 2, sw, 1)
-        # hover highlight
+        app.ren.fillRect(cx, lineY + app.fontH - 4, sw, 1)
         if span.cmd == app.hoverLink:
           app.ren.setColor((r: 143u8, g: 188u8, b: 187u8, a: 40u8))
           discard app.ren.setDrawBlendMode(BlendMode_Blend)
-          app.ren.fillRect(cx, lineY, sw, app.lineH)
+          app.ren.fillRect(cx, lineY + 4, sw, app.fontH - 4)
           discard app.ren.setDrawBlendMode(BlendMode_None)
 
       cx += sw
@@ -319,13 +291,12 @@ proc renderRightPanel(app: var App) =
   # input bar
   let iy = viewH
   app.ren.setColor(COL_BG_INPUT)
-  app.ren.fillRect(panelX, iy, panelW, INPUT_H)
+  app.ren.fillRect(0, iy, panelW, INPUT_H)
   app.ren.setColor(COL_SASH)
-  app.ren.fillRect(panelX, iy, panelW, 1)
+  app.ren.fillRect(0, iy, panelW, 1)
 
-  # inpur bar entry symbol
-  let promptW = app.ren.renderText(app.font, ">", panelX + TEXT_PAD, iy + 7, COL_FG_DIM)
-  let inputX  = panelX + TEXT_PAD + promptW + 6
+  let promptW = app.ren.renderText(app.font, ">", TEXT_PAD, iy + 7, COL_FG_DIM)
+  let inputX  = TEXT_PAD + promptW + 6
   let inputW  = panelW - TEXT_PAD * 2 - promptW - 6 - 36
 
   var iclip = rect(inputX.cint, (iy + 1).cint, inputW.cint, (INPUT_H - 2).cint)
@@ -334,7 +305,6 @@ proc renderRightPanel(app: var App) =
                               inputX - app.inputScroll, iy + 7, COL_FG)
   discard app.ren.setClipRect(nil)
 
-  # <enter> tag
   if app.showCursor:
     let curX = inputX + textWidth(app.font, app.inputText[0 ..< app.inputCursor]) -
                app.inputScroll
@@ -342,7 +312,36 @@ proc renderRightPanel(app: var App) =
       app.ren.setColor(COL_CURSOR)
       app.ren.fillRect(curX, iy + 5, 2, app.fontH)
 
-  discard app.ren.renderText(app.font, "<enter>", app.winW - 75, iy + 7, COL_FG_DIM)
+  discard app.ren.renderText(app.font, "<help>", panelW - 70, iy + 7, COL_FG_DIM)
+
+proc renderRightPanel(app: var App) =
+  ## Right panel: background image + HUD stats.
+  let panelX = app.sashX + SASH_W
+  let panelW = app.winW - panelX
+
+  app.ren.setColor(COL_BG)
+  app.ren.fillRect(panelX, 0, panelW, app.winH)
+
+  if app.bgTex != nil:
+    var dst = app.bgRect
+    discard app.ren.copy(app.bgTex, nil, dst.addr)
+
+  if app.hudStats.len > 0:
+    let hx   = panelX + HUD_MARGIN
+    let boxH = HUD_PAD * 2 + app.hudStats.len * HUD_LINE_H
+    app.ren.setColor((r: 17u8, g: 17u8, b: 17u8, a: 220u8))
+    discard app.ren.setDrawBlendMode(BlendMode_Blend)
+    app.ren.fillRect(hx, HUD_MARGIN, HUD_BOX_W, boxH)
+    discard app.ren.setDrawBlendMode(BlendMode_None)
+    app.ren.setColor(COL_SASH)
+    var box = rect(hx.cint, HUD_MARGIN.cint, HUD_BOX_W.cint, boxH.cint)
+    discard app.ren.drawRect(box.addr)
+    for i, (label, val) in app.hudStats:
+      let ty = HUD_MARGIN + HUD_PAD + i * HUD_LINE_H
+      let lw = app.ren.renderText(app.font, label & ": ",
+                                  hx + HUD_PAD, ty, COL_FG_DIM)
+      discard app.ren.renderText(app.font, val,
+                                  hx + HUD_PAD + lw, ty, COL_FG)
 
 proc renderSash(app: var App; hot: bool) =
   app.ren.setColor(if hot: COL_SASH_HOT else: COL_SASH)
@@ -374,16 +373,18 @@ proc loadBgImage(app: var App; path: string) =
   freeSurface(surf)
 
 proc recomputeBgRect(app: var App) =
-  ## Fit the background image to the left panel, centred, preserving aspect ratio.
+  ## Fit the background image to the right panel, centred, preserving aspect ratio.
   if app.bgTex == nil: return
-  let aspect = app.bgW.float / app.bgH.float
+  let panelX  = app.sashX + SASH_W
+  let panelW  = app.winW - panelX
+  let aspect  = app.bgW.float / app.bgH.float
   var dw = (app.winH.float * aspect).int
   var dh = app.winH
-  if dw > app.sashX:
-    dw = app.sashX
-    dh = (app.sashX.float / aspect).int
-  app.bgRect = rect(((app.sashX - dw) div 2).cint,
-                    ((app.winH  - dh) div 2).cint,
+  if dw > panelW:
+    dw = panelW
+    dh = (panelW.float / aspect).int
+  app.bgRect = rect((panelX + (panelW - dw) div 2).cint,
+                    ((app.winH - dh) div 2).cint,
                     dw.cint, dh.cint)
 
 # ─── Input handling ──────────────────────────────────────────────────────────
@@ -415,11 +416,10 @@ proc handleLinkClick(app: var App; cmd: string) =
 
 proc hitTestLink(app: App; mx, my: int): string =
   ## Return the command of any link span under (mx, my), or "".
-  let panelX = app.sashX + SASH_W
-  if mx < panelX or my >= app.winH - INPUT_H: return ""
+  if mx >= app.sashX or my >= app.winH - INPUT_H: return ""
   let li = (my + app.buf.scrollY) div app.lineH
   if li < 0 or li >= app.buf.lines.len: return ""
-  var cx = panelX + TEXT_PAD
+  var cx = TEXT_PAD
   for span in app.buf.lines[li]:
     let sw = textWidth(app.font, span.text)
     if mx >= cx and mx < cx + sw:
@@ -462,7 +462,7 @@ proc main*() =
     lineH:      fh.int + 6,
     winW:       1280,
     winH:       768,
-    sashX:      800,
+    sashX:      420,
     showCursor: true,
   )
 
@@ -538,9 +538,10 @@ proc main*() =
         else:
           app.hoverLink = app.hitTestLink(mx, my)
           setCursor:
-            if app.hoverLink.len > 0: app.curHand
+            if my >= app.winH - INPUT_H and mx >= app.sashX - 74 and mx < app.sashX: app.curHand
+            elif app.hoverLink.len > 0: app.curHand
             elif mx >= app.sashX and mx < app.sashX + SASH_W: app.curSizeWE
-            elif my >= app.winH - INPUT_H: app.curIBeam
+            elif mx < app.sashX and my >= app.winH - INPUT_H: app.curIBeam
             else: app.curArrow
           if app.selecting:
             app.selEnd       = app.anchorFromMouse(mx, my)
@@ -565,6 +566,10 @@ proc main*() =
         if ev.button.button == BUTTON_LEFT:
           if app.draggingSash:
             app.draggingSash = false
+          elif my >= app.winH - INPUT_H and mx >= app.sashX - 74 and mx < app.sashX:
+            app.selecting    = false
+            app.hasSelection = false
+            toGame.send(GameMsg(kind: gmInput, raw: "help"))
           elif app.selecting:
             app.selecting = false
             let moved = abs(app.selEnd.px - app.selStart.px) +
@@ -585,8 +590,10 @@ proc main*() =
         app.inputCursor += s.len
         app.showCursor   = true
         app.cursorBlink  = nowTick
-        let inputX = app.sashX + SASH_W + TEXT_PAD + textWidth(app.font, "> ") + 6
-        app.clampInputScroll(inputX, app.winW - inputX - 40)
+        let promptW2 = textWidth(app.font, ">")
+        let inputX   = TEXT_PAD + promptW2 + 6
+        let inputW2  = app.sashX - TEXT_PAD * 2 - promptW2 - 6 - 36
+        app.clampInputScroll(inputX, inputW2)
 
       of KeyDown:
         let ks   = ev.key.keysym
