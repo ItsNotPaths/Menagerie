@@ -10,6 +10,7 @@ import state
 import content
 import world
 import clock
+import api
 import ../commands/core
 import ../commands/cmd_world
 import ../commands/cmd_town
@@ -71,6 +72,8 @@ proc gameThread(contentDir: string) {.thread.} =
     initCmdWorld()
     initCmdTown()
     initCmdInventory()
+
+    initApi()
 
     # Initialise game state — start on the world map
     var state = initGameState()

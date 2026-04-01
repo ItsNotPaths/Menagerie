@@ -34,6 +34,7 @@ type
     ## Perk-only fields (present when modifiers key exists):
     modifiers*:                      JsonNode   ## {modifier_key: float_value}
     onKill*:                         seq[string]
+    raw*:                            JsonNode   ## full JSON for on_<event> handler lookup
 
   NpcDef* = object
     id*, displayName*, faction*:     string
@@ -181,6 +182,7 @@ proc loadEffects(dir: string) =
       interactions:     if d.hasKey("interactions"): d["interactions"] else: newJArray(),
       modifiers:        if d.hasKey("modifiers"): d["modifiers"] else: newJNull(),
       onKill:           strSeq(d{"on_kill"}),
+      raw:              d,
     )
 
 proc loadNpcs(dir: string) =

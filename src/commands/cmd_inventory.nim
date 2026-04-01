@@ -8,6 +8,7 @@ import engine/state
 import engine/content
 import engine/items
 import commands/core
+import engine/api
 
 const invCategories  = ["weapon", "armor", "consumable", "container",
                         "material", "quest", "currency"]
@@ -301,9 +302,7 @@ proc cmdConsume(state: var GameState; args: seq[string]): CmdResult =
     return err(&"'{info.displayName}' is not a consumable.")
   var effectLines: seq[string]
   for cmdStr in info.effects:
-    let r = dispatch(cmdStr, state)
-    if not r.isError:
-      effectLines.add r.lines
+    effectLines &= api.runCommand(state, cmdStr, "player")
   discard takeItem(state, itemId)
   let fresh = if hasItem(state, itemId): itemDetailLines(state, itemId) else: @[]
   var lines = @[&"You use {info.displayName}."]

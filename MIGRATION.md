@@ -408,12 +408,23 @@ step in `dispatch` before the table lookup.
 
 > **Notes:** `ItemInfo` unified lookup across `content.items` and `content.armorPlates` via `anyItem()`. Equippable items stored as individual inventory entries; consumables/materials stack. Container stamina budget enforced on equip.
 
-### Phase 5 — Effects, Conditions, Modifiers
+### Phase 5 — Effects, Conditions, Modifiers ✓ DONE 2026-04-01
 *Goal: status effects tick down; perks fire events.*
 
-- [ ] `src/engine/conditions.nim` — `hasEffect`, `tickEffects`, `checkInteractions`
-- [ ] `src/engine/modifiers.nim` — `get` (multiplicative accumulator), `fireEvent`, perk event dispatch
-- [ ] `src/engine/armor.nim` — plate iteration, `fireEffectProcs`, event hooks
+- [x] `src/engine/api_types.nim` — hook proc vars (`apiRunCommand`, `apiAddEffect`) to break api ↔ conditions/armor/modifiers circular import
+- [x] `src/engine/conditions.nim` — `hasEffect`, `tickEffects`, `checkInteractions` (two-pass interaction chain)
+- [x] `src/engine/modifiers.nim` — `modifierGet` (multiplicative accumulator), `fireEvent` with full event context table
+- [x] `src/engine/armor.nim` — `iterEquippedPlates`, `iterEntityPlates`, `fireEffectProcs`
+- [x] `src/engine/api.nim` — full internal command dispatcher (`damage`, `add_effect`, `remove_effect`, `set_stat`, `give`, `print`, `pause`); `initApi()` wires hooks
+- [x] `src/commands/cmd_inventory.nim` — fixed `cmdConsume`: replaced broken `dispatch()` call with `api.runCommand()`
+- [x] `src/engine/content.nim` — added `raw: JsonNode` to `EffectDef` for `on_<event>` handler lookup
+- [x] `src/engine/game_loop.nim` — wired `initApi()` call before game loop
+
+> **Notes:** Circular import broken via `api_types.nim` hook vars (not `api_types` + `api_impl` split as originally suggested — hooks are simpler).
+> `give_xp`, `train_skill`, `cast` verbs in `api.runCommand` deferred to Phase 6 (skills/spells modules not yet written).
+> Enemy damage/set_stat in `api.nim` fully wired via `state.combat` copy-modify-replace pattern.
+> `rand(99)` in `armor.fireEffectProcs` uses default Nim RNG; call `randomize()` at game start (Phase 6 concern).
+> `std/tables` must be imported explicitly in any module that accesses `state.variables` or `state.player.armor` — not re-exported from `state.nim`.
 
 ### Phase 6 — Combat
 *Goal: full spatial grid combat loop.*
@@ -680,4 +691,4 @@ No other api-level logic has leaked into other modules yet — the systems that 
 
 ---
 
-*Last updated: 2026-03-31 — Phase 4 complete*
+*Last updated: 2026-04-01 — Phase 5 complete*
