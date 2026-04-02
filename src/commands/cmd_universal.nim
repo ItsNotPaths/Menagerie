@@ -9,6 +9,7 @@ import engine/clock
 import engine/content
 import engine/gameplay_vars
 import engine/world
+import engine/saves
 import commands/core
 
 
@@ -65,7 +66,7 @@ proc cmdSleep(state: var GameState; args: seq[string]): CmdResult =
   state.player.gold -= cost
   state.player.lastRestPosition = state.player.position
   state.player.lastRestRoom     = state.player.currentRoom
-  # SAVES_WIRE flush_player
+  saves.flushPlayer(state)
   let restorePH = gvFloat("fatigue_sleep_restore_per_hour", 60.0)
   state.player.fatigue = min(100.0, state.player.fatigue + float(hours) * restorePH)
   let suf = if hours == 1: "" else: "s"
@@ -83,22 +84,45 @@ proc cmdStatus(state: var GameState; args: seq[string]): CmdResult =
   )
 
 
-# ── Save / load stubs (Phase 9) ───────────────────────────────────────────────
-# SAVES_WIRE on_save
+# ── Save / load commands ──────────────────────────────────────────────────────
+
 proc cmdSave(state: var GameState; args: seq[string]): CmdResult =
-  ok("(save not yet implemented)")  # Phase 9: saves.flushToWorking(state); saves.zipWorking()
+  let name = if args.len > 0: args.join(" ") else: ""
+  let slot = saves.saveGame(state, name)
+  ok(&"Game saved to slot '{slot}'.")
 
-# SAVES_WIRE on_load
 proc cmdLoad(state: var GameState; args: seq[string]): CmdResult =
-  ok("(load not yet implemented)")  # Phase 9: saves.loadFromWorking(state)
+  if args.len == 0:
+    let saves_list = saves.listSaves()
+    var lines = @["Load which save? (type: load <name>)", ""]
+    for e in saves_list.auto:   lines.add &"  {e.display}"
+    for e in saves_list.manual: lines.add &"  {e.display}"
+    if saves_list.auto.len == 0 and saves_list.manual.len == 0:
+      lines.add "  (no saves found)"
+    return ok(lines)
+  let name = args.join("_")
+  try:
+    saves.loadGame(name, state)
+    var lines = @[&"Loaded save '{name}'."] & world.currentLines(state)
+    return ok(lines)
+  except IOError as e:
+    return err(e.msg)
 
-# SAVES_WIRE on_new_game
 proc cmdNew(state: var GameState; args: seq[string]): CmdResult =
-  ok("(new game not yet implemented)")  # Phase 9: saves.clearWorking(); initGameState()
+  saves.newGame(state)
+  var lines = @["New game started."] & world.currentLines(state)
+  ok(lines)
 
-# SAVES_WIRE on_continue
 proc cmdContinue(state: var GameState; args: seq[string]): CmdResult =
-  ok("(continue not yet implemented)")  # Phase 9: saves.loadFromWorking(state) if save exists
+  let name = saves.mostRecentSave()
+  if name == "":
+    return err("No save found. Type [[new]] to start a new game.")
+  try:
+    saves.loadGame(name, state)
+    var lines = @[&"Continuing save '{name}'."] & world.currentLines(state)
+    return ok(lines)
+  except IOError as e:
+    return err(e.msg)
 
 
 proc initCmdUniversal*() =

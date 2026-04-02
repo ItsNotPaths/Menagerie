@@ -5,6 +5,8 @@ PROJECT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 RELEASE_DIR="$(cd "$PROJECT_DIR/.." && pwd)/menagerie-proto-release"
 IMAGE_NAME="menagerie-linux-build"
 BINARY="menagerie"
+SETTINGS="settings.txt"
+CONTENT="content"
 
 # ── Build the Docker image ────────────────────────────────────────────────────
 # Build context is the project root so COPY can reach vendor/.
@@ -49,10 +51,14 @@ echo ""
 # ── Copy to release directory ─────────────────────────────────────────────────
 echo "==> Copying to release directory..."
 mkdir -p "$RELEASE_DIR"
+
 cp "$PROJECT_DIR/$BINARY" "$RELEASE_DIR/$BINARY"
 rm "$PROJECT_DIR/$BINARY"
-cp -r "$PROJECT_DIR/content" "$RELEASE_DIR/content"
-cp -r "$PROJECT_DIR/data" "$RELEASE_DIR/data"
+
+cp "$PROJECT_DIR/$SETTINGS" "$RELEASE_DIR/$SETTINGS"
+
+cp -rf "$PROJECT_DIR/content" "$RELEASE_DIR/content"
+cp -rf "$PROJECT_DIR/data" "$RELEASE_DIR/data"
 
 echo ""
 echo "Done. Release output:"

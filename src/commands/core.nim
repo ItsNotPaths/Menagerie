@@ -9,6 +9,7 @@ import std/[algorithm, strformat, strutils, tables]
 import engine/state
 import engine/clock
 import engine/world
+import engine/saves
 
 
 # ── Result type ───────────────────────────────────────────────────────────────
@@ -138,7 +139,7 @@ proc dispatch*(raw: string; state: var GameState): CmdResult =
 
   if result.ticks > 0:
     passTicks(state, result.ticks)
-    # SAVES_WIRE autosave
+    saves.autosave(state)
 
   # After a combat-ending command restore the correct image
   if ctx == ctxCombat and state.context != ctxCombat and result.imagePath == "":

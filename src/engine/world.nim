@@ -12,6 +12,7 @@ import std/[json, options, random, sequtils, strformat, strutils, tables]
 import engine/state
 import engine/content
 import engine/clock
+import engine/saves
 
 # ── Terrain constants ─────────────────────────────────────────────────────────
 
@@ -345,7 +346,8 @@ proc spawnTileEnemies(state: var GameState; tileKey: string; tileDef: TileDef; t
       let eId = enemyType.getStr
       if eId == "": continue
       let counter = state.variables.getOrDefault("_npc_spawn_counter", newJInt(0)).getInt + 1
-      state.variables["_npc_spawn_counter"] = %counter   # SAVES_WIRE flush_variables
+      state.variables["_npc_spawn_counter"] = %counter
+      saves.flushVariables(state)
       let instanceId = &"{eId}_{counter}"
       let npc = content.getNpc(eId)
       let baseHealth = if npc.id != "": npc.health else: 20.0
@@ -517,9 +519,10 @@ proc enterLocation*(state: var GameState): seq[string] =
 
   let key = &"{x}_{y}"
 
-  # Lazy-init dirty entry on first visit
+  # Lazy-load from disk on first visit; init fresh if no saved state exists
   if key notin state.dirty:
-    initLocatedDirty(state, key, tile)
+    if not saves.loadDirtyTile(state, key):
+      initLocatedDirty(state, key, tile)
 
   let dirty = state.dirty.getOrDefault(key, newJNull())
   let tileName = if dirty.kind == JObject: dirty{"tile"}.getStr else: ""
@@ -575,7 +578,7 @@ proc dropEntityLoot*(state: var GameState; entityId: string): seq[string] =
   if entityId in state.npcStates:
     if state.npcStates[entityId].kind == JObject:
       state.npcStates[entityId]["alive"] = %false
-      # SAVES_WIRE flush_npc_states
+      saves.flushNpcStates(state)
 
   let loc    = state.npcStates.getOrDefault(entityId, newJNull())
   let baseId = if loc.kind == JObject: loc{"spawned_from"}.getStr(entityId) else: entityId
@@ -617,7 +620,7 @@ proc dropEntityLoot*(state: var GameState; entityId: string): seq[string] =
       state.dirty[key]["items"] = newJArray()
     for iid in dropped:
       state.dirty[key]["items"].add %iid
-    # SAVES_WIRE flush_dirty
+    saves.flushDirty(state, key)
 
   dropped
 

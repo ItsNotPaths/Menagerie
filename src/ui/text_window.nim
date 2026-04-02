@@ -88,6 +88,12 @@ type
     # HUD stats (label, value) pairs — updated via umStats messages
     hudStats: seq[(string, string)]
 
+    # Panel state — tracks where the most recent panel block sits in buf.lines
+    # so that umPanelAppend can replace it in-place rather than appending.
+    # panelStart = -1 means no panel is currently tracked.
+    panelStart: int   ## buf.lines index where panel begins
+    panelLen:   int   ## number of lines the panel occupies
+
     # system cursors (created once, reused every frame)
     curArrow:  CursorPtr
     curHand:   CursorPtr
@@ -463,6 +469,7 @@ proc main*() =
     winH:       768,
     sashX:      420,
     showCursor: true,
+    panelStart: -1,
   )
 
   app.curArrow  = createSystemCursor(SDL_SYSTEM_CURSOR_ARROW)
@@ -502,10 +509,26 @@ proc main*() =
           if i >= 0: app.hudStats.add (s[0 ..< i], s[i + 2 .. ^1])
           else:      app.hudStats.add (s, "")
       of umPanelReplace:
+        # Establish a new panel anchor at the current end of the buffer.
+        app.panelStart = app.buf.lines.len
         for line in msg.replaceLines: app.buf.addLine(line)
+        app.panelLen = msg.replaceLines.len
         dirtyBuf = true
       of umPanelAppend:
-        for line in msg.appendLines: app.buf.addLine(line)
+        # Replace the tracked panel in-place with fresh content.
+        # Lines that were appended after the panel (e.g. feedback lines from
+        # earlier commands) stay in position — only the panel block is spliced.
+        let ps = app.panelStart
+        let pl = app.panelLen
+        if ps >= 0 and pl >= 0 and ps + pl <= app.buf.lines.len:
+          for _ in 0 ..< pl:
+            app.buf.lines.delete(ps)
+          for i in 0 ..< msg.appendLines.len:
+            app.buf.lines.insert(parseLine(msg.appendLines[i]), ps + i)
+          app.panelLen = msg.appendLines.len
+          app.hasSelection = false   # line indices may have shifted
+        else:
+          for line in msg.appendLines: app.buf.addLine(line)
         dirtyBuf = true
       of umRenderSprites: discard
     if dirtyBuf:

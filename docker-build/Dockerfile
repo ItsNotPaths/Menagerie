@@ -80,4 +80,4 @@ RUN curl -L "https://nim-lang.org/download/nim-${NIM_VERSION}-linux_x64.tar.xz" 
     && ln -sf "/opt/nim-${NIM_VERSION}/bin/nim" /usr/local/bin/nim \
     && ln -sf "/opt/nim-${NIM_VERSION}/bin/nimble" /usr/local/bin/nimble
 
-RUN nimble install sdl2 -y
+RUN nimble install sdl2 -y && nimble install zippy -y

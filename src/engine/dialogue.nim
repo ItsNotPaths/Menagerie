@@ -17,6 +17,7 @@ import state
 import content
 import variables as vars
 import economy   as econ
+import api_types
 
 # ── Link rendering ────────────────────────────────────────────────────────────
 
@@ -109,6 +110,14 @@ proc selectTopic*(state: var GameState; topicId: string): seq[string] =
   if changesNode != nil and changesNode.kind == JArray:
     for c in changesNode: changes.add c
   vars.applyChanges(changes, state.variables)
+
+  # Run inline_script commands
+  let scriptNode = topicNode{"inline_script"}
+  if scriptNode != nil and scriptNode.kind == JArray:
+    for cmd in scriptNode:
+      let line = cmd.getStr
+      if line.len > 0:
+        result &= apiRunCommand(state, line, npcId)
 
   let text = renderLinks(topicNode{"dialogue_text"}.getStr)
 

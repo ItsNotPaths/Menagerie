@@ -454,7 +454,7 @@ step in `dispatch` before the table lookup.
 > `dialogue.nim` uses `std/re` (`replacef`) for link rewriting — NPC raw JSON accessed via `npc.raw{"topics"}`.
 > `economy.nim` reads shop trades directly from `content.shops[id].raw{"items"}` (no typed trade struct needed).
 
-### Phase 8 — Stealth & Scripting
+### Phase 8 — Stealth & Scripting ✓ DONE 2026-04-01
 *Goal: sneak mode works; Lua scripts drive content events.*
 
 - [x] `src/engine/sneak.nim` — stealth rolls, pickpocket, rotate target, stealth attack
@@ -468,13 +468,32 @@ step in `dispatch` before the table lookup.
   - `combat.killEnemy` resolves `death_script` field via `api.runCommand`
   - `scripting.passC` path-with-spaces bug fixed (was latent; Lua not compiled in main path since Phase 3)
 - [x] Replace Python flat-string `scripts.py` sandbox with Lua — architecturally done; `scriptsDir` set to `content/scripts/`
+- [x] `content/scripts/*.py` replaced with `.lua` equivalents (`death_satchel.lua`, `town-villager_dialogue_town.lua`)
+- [x] `src/commands/cmd_debug.nim` — `dblua <script>` command for testing Lua scripts from the input bar
+- [x] Background image rendering changed from shrink-to-fit to scale-to-height crop (centered, clipped at sash)
+- [x] Inventory and shop categories display vertically (one per line) instead of all on one line
+- [x] `docker-build/build.sh` removes compiled binary from source repo after copying to release folder
+- [x] All saves wire-up points marked `# SAVES_WIRE <operation>` throughout source; documented in Phase 9 table below
 
-### Phase 9 — Saves
+> **Notes:** `scripting.nim` uses a `gScriptState: ptr GameState` global for cdecl Lua callbacks — safe because scripts are synchronous.
+> `gScriptSelfId` carries the entity context (`"player"` or enemy id) through Lua execution so `engine.cmd` effects target correctly.
+> `ItemInfo` in `items.nim` has no `description` field — `sneak.nim` reads descriptions directly from `content.items.getOrDefault(itemId).description`.
+> `tmpnam` warning from Lua amalgamation is a nothingburger (glibc-only, never called in practice); Lua runtime will be stripped to logic-flow-only subset in a future pass.
+
+### Phase 9 — Saves ✓ DONE 2026-04-02
 *Goal: save and load a full game.*
 
-- [ ] `src/engine/saves.nim` — `flushToWorking`, `zipWorking`, `loadFromWorking`, `clearWorkingOnLaunch`, autosave rotation
-- [ ] `src/commands/cmd_universal.nim` — `save`, `load`, `new`, `continue` (stubs already registered)
-- [ ] Verify dirty tile write-through (`flushDirty` on each mutation)
+- [x] `src/engine/saves.nim` — `flushToWorking`, `zipWorking`, `loadFromWorking`, `clearWorkingOnLaunch`, autosave rotation
+- [x] `src/commands/cmd_universal.nim` — `save`, `load`, `new`, `continue` fully wired
+- [x] All `SAVES_WIRE` markers replaced with live calls in `combat.nim`, `sneak.nim`, `world.nim`, `core.nim`
+- [x] Dirty tile lazy-load wired in `world.enterLocation`
+- [x] `zippy >= 0.10.0` added to `menagerie.nimble`; `nimble install zippy -y` added to Dockerfile
+
+> **Notes:** zippy `addDir` includes the directory name in ZIP paths — ZIP is built manually
+> using `walkDirRec` + `ArchiveEntry` so paths inside the archive are relative to `working/`
+> (no `"working/"` prefix), matching what `extractAll` expects.
+> `game_loop` now calls `saves.clearWorkingOnLaunch()` + `saves.newGame()` at startup instead
+> of the old hard-coded state init (so world_seed is random each launch, not from world_def).
 
 All wire-up points are marked `# SAVES_WIRE <operation>` in source — `grep -r SAVES_WIRE src/` finds them all.
 
@@ -620,14 +639,12 @@ Beyond Nim source code, some Python-specific content files will need updates:
 
 | What | Python format | Nim target |
 |---|---|---|
-| `content/scripts/*.py` | Pseudo-command syntax (not real Python) | Trivial — port to `.lua` |
-| NPC `script:` fields in JSON | `.py` file path references | Change extension to `.lua` |
+| `content/scripts/*.py` | Pseudo-command syntax (not real Python) | ✓ Done — replaced with `.lua` equivalents |
+| NPC `script:` fields in JSON | `.py` file path references | Update extension to `.lua` in NPC JSON |
 | Effect/perk event hooks | `on_kill: ["damage player 5"]` command strings | Add `lua_hooks` table (see §9.3) |
 | `content/ai_packages/*.json` | Python AI condition syntax | Same format — port condition evaluator to Nim |
 
-**Notes on content scripts**: The two files in `content/scripts/` (`death_satchel.py`,
-`town-villager_dialogue_town.py`) are pseudo-command text files, not real Python.
-They're trivial to migrate — essentially already Lua-ready.
+**Notes on content scripts**: `death_satchel.py` and `town-villager_dialogue_town.py` have been replaced with `.lua` equivalents (Phase 8). NPC JSON `death_script` fields that still reference `.py` paths need the extension updated to `.lua`.
 
 **`mod_manager.py`**: A Tkinter-based authoring GUI that manages content packs and
 runs export drivers. It is a **dev tool only** — nothing to port. The Nim runtime
@@ -703,23 +720,16 @@ Minor in `src/commands/cmd_inventory.nim`:
 - `[[Equip:equip container {id}]]` and `[[Unequip:unequip container {id}]]` — label hides the id and `container` keyword. Acceptable for now since the item detail panel provides context, but a terminal user still needs to know the full syntax.
 - `[[favourite:favourite_item {id}]]` / `[[unfavourite:unfavourite_item {id}]]` — label and command name diverge. Consider renaming the commands to `favourite` / `unfavourite` (with item id as arg).
 
-### 13.2 `api.nim` not yet written — one known wrong call
+### 13.2 `api.nim` — resolved
 
-`api.py` is a second dispatcher for *content-authored command strings* (effect `tick_commands`, spell `on_hit_commands`, item `effects`, armor proc commands, etc.). These strings look like `damage player 20` or `add_effect player poison 5`. They are **not** player input — they're engine-internal calls routed through their own mini-dispatcher to avoid circular imports with the player command system.
+`api.nim` is complete (Phase 5). It is the universal dispatcher for *content-authored command strings* (`damage player 20`, `add_effect player poison 5`, `.lua` script paths, etc.) — separate from the player command registry.
 
-`api.nim` is intentionally deferred until Phase 5/6 when conditions, armor, and spells are written (they're the main callers). The dependency order is:
+The mutual dependency between `api.nim` and `conditions.nim` was broken via `src/engine/api_types.nim` hook proc vars (`apiRunCommand`, `apiAddEffect`) rather than a module split.
 
-```
-api.nim depends on: items, armor, spells, conditions, modifiers, skills, scripting
-conditions.nim depends on: api  ← mutual, needs forward ref or split
-```
+The wrong `dispatch()` call in `cmdConsume` (`src/commands/cmd_inventory.nim`) was replaced with `api.runCommand()` in Phase 5.
 
-**Known wrong call (fix when api.nim is written):**
-
-`src/commands/cmd_inventory.nim` — `cmdConsume` calls `dispatch(cmdStr, state)` for item effect strings. `dispatch` routes through the *player* command registry — a string like `damage player 10` will silently fail because no player command named `damage` is registered. Fix: replace with `api.runCommand(cmdStr, state)` once `api.nim` exists.
-
-No other api-level logic has leaked into other modules yet — the systems that need it (conditions, armor procs, spell on-hit) haven't been written.
+From Phase 8, `api.runCommand` also handles `.lua` suffixes transparently — both `"damage player 20"` and `"death_satchel.lua"` are valid inputs and route correctly.
 
 ---
 
-*Last updated: 2026-04-01 — Phase 7 complete*
+*Last updated: 2026-04-01 — Phase 8 complete*

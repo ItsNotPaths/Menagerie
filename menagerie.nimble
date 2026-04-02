@@ -9,3 +9,4 @@ bin           = @["menagerie"]
 # Dependencies
 requires "nim >= 2.0.0"
 requires "sdl2 >= 2.0.5"
+requires "zippy >= 0.10.0"

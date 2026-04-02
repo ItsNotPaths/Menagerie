@@ -5,7 +5,7 @@
 ##
 ## Call startGameThread(contentDir) from the main thread before ui.main().
 
-import std/[json, os, strformat, tables]
+import std/[json, os, strformat]
 import state
 import content
 import world
@@ -13,6 +13,7 @@ import clock
 import api
 import scripting
 import settings
+import saves
 import ../commands/core
 import ../commands/cmd_world
 import ../commands/cmd_town
@@ -95,10 +96,10 @@ proc gameThread(contentDir: string) {.thread.} =
 
     initApi()
 
-    # Initialise game state — start on the world map
+    # Clear stale working dir and start a fresh game
+    saves.clearWorkingOnLaunch()
     var state = initGameState()
-    state.context = ctxWorld
-    state.variables["world_seed"] = %worldDef.worldSeed
+    saves.newGame(state)
 
     # Send welcome message and initial look
     toUi.send(UiMsg(kind: umPrint, line: "Welcome to Menagerie."))

@@ -12,7 +12,7 @@
 ##   stealth_attack     — deal sneak_attack_mult * weapon damage; conditional detection
 
 import std/[json, random, strutils, tables]
-import state, content, items, modifiers, skills
+import state, content, items, modifiers, skills, saves
 import combat as cbt
 import world as wld
 
@@ -100,10 +100,10 @@ proc doPickpocket*(state: var GameState): seq[string] =
       let key = "bounty_" & faction
       let cur = state.variables.getOrDefault(key, %0).getInt(0)
       state.variables[key] = %(cur + 1)
-      # SAVES_WIRE flush_variables
+      saves.flushVariables(state)
 
     state.npcStates.mgetOrPut(npcId, newJObject())["hostile"] = %true
-    # SAVES_WIRE flush_npc_states
+    saves.flushNpcStates(state)
     wld.populateRoomQueue(state)
     result &= cbt.startCombat(state)
 
@@ -178,10 +178,10 @@ proc doStealthAttack*(state: var GameState): seq[string] =
       let key = "bounty_" & npc.faction
       let cur = state.variables.getOrDefault(key, %0).getInt(0)
       state.variables[key] = %(cur + 3)
-      # SAVES_WIRE flush_variables
+      saves.flushVariables(state)
 
     state.npcStates.mgetOrPut(npcId, newJObject())["health"] = %0.0
-    # SAVES_WIRE flush_npc_states
+    saves.flushNpcStates(state)
 
     result.add label & " crumples silently."
     result &= dropped
@@ -200,7 +200,7 @@ proc doStealthAttack*(state: var GameState): seq[string] =
 
   else:
     state.npcStates.mgetOrPut(npcId, newJObject())["health"] = %newHp
-    # SAVES_WIRE flush_npc_states
+    saves.flushNpcStates(state)
     result.add label & " has " & $newHp.int & " health remaining."
 
     if stealthRoll(state):
@@ -209,6 +209,6 @@ proc doStealthAttack*(state: var GameState): seq[string] =
       state.sneaking = false
       result.add "You've been spotted!"
       state.npcStates.mgetOrPut(npcId, newJObject())["hostile"] = %true
-      # SAVES_WIRE flush_npc_states
+      saves.flushNpcStates(state)
       wld.populateRoomQueue(state)
       result &= cbt.startCombat(state)

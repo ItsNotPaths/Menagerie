@@ -3,9 +3,11 @@
 ## World-map commands: go, look, survey, travel, peek, enter.
 ## Call initCmdWorld() from game_loop to register handlers.
 
-import std/[strformat, strutils, tables]
+import std/[json, sequtils, strformat, strutils, tables]
 import engine/state
 import engine/world
+import engine/items
+import engine/saves
 import commands/core
 
 let goDirs = {
@@ -83,6 +85,67 @@ proc cmdTravel(state: var GameState; args: seq[string]): CmdResult =
   result.imagePath = tileImagePath(state, x, y)
 
 
+# ── Scavenge / take ───────────────────────────────────────────────────────────
+
+proc scavengePanelLines(state: GameState; key: string): seq[string] =
+  ## Build the current item-link list for a tile's dirty items. Used by both
+  ## cmdScavenge (to establish the panel) and cmdTake (to refresh it in-place).
+  let dirty = state.dirty.getOrDefault(key, newJNull())
+  let ids   = if dirty.kind == JObject and dirty{"items"} != nil and
+                 dirty["items"].kind == JArray:
+                dirty["items"].getElems.mapIt(it.getStr)
+              else: @[]
+  if ids.len == 0:
+    return @["  (nothing left)"]
+  var counts: Table[string, int]
+  for id in ids: counts[id] = counts.getOrDefault(id, 0) + 1
+  for id, count in counts:
+    let info = anyItem(id)
+    let name = if info.displayName != "": info.displayName else: id
+    let qty  = if count > 1: &" x{count}" else: ""
+    result.add &"  [[{name}{qty}:take {id}]]"
+
+
+proc cmdScavenge(state: var GameState; args: seq[string]): CmdResult =
+  let (x, y) = state.player.position
+  let key    = &"{x}_{y}"
+  let dirty  = state.dirty.getOrDefault(key, newJNull())
+  let ids    = if dirty.kind == JObject and dirty{"items"} != nil and
+                  dirty["items"].kind == JArray:
+                 dirty["items"].getElems.mapIt(it.getStr)
+               else: @[]
+  if ids.len == 0:
+    return ok("You search the area.", "Nothing here worth taking.")
+  CmdResult(lines: @["You search the area."],
+            panelLines: scavengePanelLines(state, key))
+
+
+proc cmdTake(state: var GameState; args: seq[string]): CmdResult =
+  if args.len == 0:
+    return err("Take what? Usage: take <item_id>")
+  let itemId = args[0].toLowerAscii
+  let (x, y) = state.player.position
+  let key    = &"{x}_{y}"
+  let dirty  = state.dirty.getOrDefault(key, newJNull())
+  if dirty.kind != JObject or dirty{"items"} == nil or
+     dirty["items"].kind != JArray:
+    return err(&"There is no '{itemId}' here.")
+  let tileItems = dirty["items"].getElems.mapIt(it.getStr)
+  let idx = tileItems.find(itemId)
+  if idx < 0:
+    return err(&"There is no '{itemId}' here.")
+  var newItems = tileItems
+  newItems.delete(idx)
+  state.dirty[key]["items"] = %newItems.mapIt(%it)
+  saves.flushDirty(state, key)
+  giveItem(state, itemId)
+  let info  = anyItem(itemId)
+  let name  = if info.displayName != "": info.displayName else: itemId
+  let fresh = scavengePanelLines(state, key)
+  CmdResult(lines: @[&"You pick up {name}."],
+            panelLines: fresh, panelAppend: true)
+
+
 proc initCmdWorld*() =
   register("look",   ctxWorld, cmdLook)
   register("go",     ctxWorld, cmdGo)
@@ -91,3 +154,5 @@ proc initCmdWorld*() =
   register("peek",   ctxWorld, cmdPeekWorld)
   register("enter",  ctxWorld, cmdEnter)
   register("travel", ctxWorld, cmdTravel)
+  registerAny("scavenge", cmdScavenge, hidden = true)
+  registerAny("take",     cmdTake,     hidden = true)
