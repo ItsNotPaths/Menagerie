@@ -48,7 +48,7 @@ const STAT_OPTIONS* = ["health", "stamina", "focus"]
 
 # ── Internal helpers ──────────────────────────────────────────────────────────
 
-func toTitleCase(s: string): string =
+func toTitleCase*(s: string): string =
   for word in s.split('_'):
     if result.len > 0: result.add ' '
     if word.len > 0:

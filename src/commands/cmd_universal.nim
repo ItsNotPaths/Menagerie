@@ -3,13 +3,15 @@
 ## Commands available in all contexts: help, wait, sleep, status.
 ## Call initCmdUniversal() from game_loop to register handlers.
 
-import std/[json, strformat, strutils]
+import std/[json, sequtils, strformat, strutils]
 import engine/state
 import engine/clock
 import engine/content
 import engine/gameplay_vars
 import engine/world
 import engine/saves
+import engine/skills
+import engine/api
 import commands/core
 
 
@@ -84,54 +86,130 @@ proc cmdStatus(state: var GameState; args: seq[string]): CmdResult =
   )
 
 
-# ── Save / load commands ──────────────────────────────────────────────────────
+# ── Save command (available in any context during play) ───────────────────────
 
 proc cmdSave(state: var GameState; args: seq[string]): CmdResult =
   let name = if args.len > 0: args.join(" ") else: ""
   let slot = saves.saveGame(state, name)
   ok(&"Game saved to slot '{slot}'.")
 
-proc cmdLoad(state: var GameState; args: seq[string]): CmdResult =
-  if args.len == 0:
-    let saves_list = saves.listSaves()
-    var lines = @["Load which save? (type: load <name>)", ""]
-    for e in saves_list.auto:   lines.add &"  {e.display}"
-    for e in saves_list.manual: lines.add &"  {e.display}"
-    if saves_list.auto.len == 0 and saves_list.manual.len == 0:
-      lines.add "  (no saves found)"
-    return ok(lines)
-  let name = args.join("_")
-  try:
-    saves.loadGame(name, state)
-    var lines = @[&"Loaded save '{name}'."] & world.currentLines(state)
-    return ok(lines)
-  except IOError as e:
-    return err(e.msg)
 
-proc cmdNew(state: var GameState; args: seq[string]): CmdResult =
-  saves.newGame(state)
-  var lines = @["New game started."] & world.currentLines(state)
+# ── Skills / level-up commands ───────────────────────────────────────────────
+
+proc skillsLines(state: GameState): seq[string] =
+  let p = state.player
+  result.add &"  Level {p.level}  ({p.xp.int}/{XP_PER_LEVEL} XP)"
+  result.add ""
+  for name in SKILL_NAMES:
+    let val = skillVal(state, name)
+    result.add &"  {toTitleCase(name):<18} {val:>3}"
+  if p.pendingSkillPicks > 0:
+    result.add ""
+    result &= skillPickPrompt(state)
+  if p.pendingStatPicks > 0:
+    result.add ""
+    result &= statPickPrompt(state)
+  if p.pendingPerkPicks > 0:
+    result.add ""
+    result &= perkPickPrompt()
+
+
+proc cmdSkills(state: var GameState; args: seq[string]): CmdResult =
+  CmdResult(panelLines: skillsLines(state))
+
+
+proc cmdLevelupSkill(state: var GameState; args: seq[string]): CmdResult =
+  if state.player.pendingSkillPicks <= 0:
+    return err("No skill pick pending.")
+  if args.len == 0:
+    return ok(skillPickPrompt(state))
+  let name = args[0].toLowerAscii
+  if name notin SKILL_NAMES:
+    return err(&"Unknown skill '{name}'. Type [[skills]] to see options.")
+  trainSkill(state, name, SKILL_BUMP)
+  dec state.player.pendingSkillPicks
+  let newVal = skillVal(state, name)
+  CmdResult(lines: @[&"  {toTitleCase(name)} improved to {newVal}."],
+            panelLines: skillsLines(state), panelAppend: true)
+
+
+proc cmdLevelupStat(state: var GameState; args: seq[string]): CmdResult =
+  if state.player.pendingStatPicks <= 0:
+    return err("No stat pick pending.")
+  if args.len == 0:
+    return ok(statPickPrompt(state))
+  let stat = args[0].toLowerAscii
+  case stat
+  of "health":  state.player.maxHealth  += STAT_BUMP
+  of "stamina": state.player.maxStamina += STAT_BUMP
+  of "focus":   state.player.maxFocus   += STAT_BUMP
+  else:
+    return err("Choose: [[health:levelup_stat health]]  [[stamina:levelup_stat stamina]]  [[focus:levelup_stat focus]]")
+  dec state.player.pendingStatPicks
+  let newMax = case stat
+    of "health":  state.player.maxHealth
+    of "stamina": state.player.maxStamina
+    else:         state.player.maxFocus
+  CmdResult(lines: @[&"  Max {toTitleCase(stat)} increased to {newMax.int}."],
+            panelLines: skillsLines(state), panelAppend: true)
+
+
+proc cmdLevelupPerk(state: var GameState; args: seq[string]): CmdResult =
+  if state.player.pendingPerkPicks <= 0:
+    return err("No perk pick pending.")
+  if args.len == 0:
+    return err("Usage: levelup_perk <perk_id>")
+  let perkId   = args[0].toLowerAscii
+  let spendPick = if args.len > 1: args[1].toLowerAscii notin ["false", "0", "no"] else: true
+  let duration  = if args.len > 2: (try: parseInt(args[2]) except ValueError: -1) else: -1
+  if spendPick: dec state.player.pendingPerkPicks
+  discard api.runCommand(state, &"add_effect player {perkId} {duration}", "player")
+  CmdResult(lines: @[&"  Perk granted: {perkId}."],
+            panelLines: skillsLines(state), panelAppend: true)
+
+
+proc cmdPerks(state: var GameState; args: seq[string]): CmdResult =
+  let perks = state.player.effects.filterIt(it.ticksRemaining == -1)
+  var lines: seq[string]
+  if perks.len == 0:
+    lines.add "  No perks active."
+  else:
+    for e in perks:
+      let def = content.getEffect(e.id)
+      let name = if def.displayName.len > 0: def.displayName else: e.id
+      lines.add &"  {name}"
+      if def.description.len > 0:
+        lines.add &"    {def.description}"
+      if def.modifiers != nil and def.modifiers.kind == JObject:
+        var mods: seq[string]
+        for k, v in def.modifiers.pairs:
+          let fv = v.getFloat
+          let sign = if fv >= 0.0: "+" else: ""
+          mods.add &"{k} {sign}{fv}"
+        if mods.len > 0:
+          lines.add &"    Modifiers: {mods.join(\", \")}"
+      lines.add ""
+  if state.player.pendingPerkPicks > 0:
+    lines &= perkPickPrompt()
   ok(lines)
 
-proc cmdContinue(state: var GameState; args: seq[string]): CmdResult =
-  let name = saves.mostRecentSave()
-  if name == "":
-    return err("No save found. Type [[new]] to start a new game.")
-  try:
-    saves.loadGame(name, state)
-    var lines = @[&"Continuing save '{name}'."] & world.currentLines(state)
-    return ok(lines)
-  except IOError as e:
-    return err(e.msg)
+
+# ── Exit ─────────────────────────────────────────────────────────────────────
+
+proc cmdExit(state: var GameState; args: seq[string]): CmdResult =
+  CmdResult(lines: @["Farewell."], quit: true)
 
 
 proc initCmdUniversal*() =
   registerAny("help",     cmdHelp)
   registerAny("wait",     cmdWait)
   registerAny("status",   cmdStatus)
-  registerAny("save",     cmdSave)
-  registerAny("load",     cmdLoad)
-  registerAny("new",      cmdNew)
-  registerAny("continue", cmdContinue)
+  registerAny("save",  cmdSave)
   register("sleep", ctxTown,    cmdSleep)
   register("sleep", ctxDungeon, cmdSleep)
+  registerAny("skills",        cmdSkills)
+  registerAny("levelup_skill", cmdLevelupSkill, hidden = true)
+  registerAny("levelup_stat",  cmdLevelupStat,  hidden = true)
+  registerAny("levelup_perk",  cmdLevelupPerk,  hidden = true)
+  registerAny("perks",         cmdPerks)
+  registerAny("exit",          cmdExit)

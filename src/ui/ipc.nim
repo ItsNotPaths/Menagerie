@@ -14,7 +14,8 @@ type
     umRenderSprites, ## render overlay sprites on the left panel
     umStats,         ## replace HUD stats ("Label: value" strings)
     umPanelReplace,  ## replace scrollback with fixed panel lines
-    umPanelAppend    ## append lines to the scrollback panel
+    umPanelAppend,   ## append lines to the scrollback panel
+    umQuit           ## shut down the SDL2 window
 
   SpriteEntry* = object
     path*:    string
@@ -35,6 +36,7 @@ type
       replaceLines*: seq[string]
     of umPanelAppend:
       appendLines*: seq[string]
+    of umQuit: discard
 
   GameMsgKind* = enum gmInput
   GameMsg* = object

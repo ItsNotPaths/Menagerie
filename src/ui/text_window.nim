@@ -82,6 +82,11 @@ type
     cursorBlink: uint32
     showCursor:  bool
 
+    # command history
+    history:    seq[string]
+    histIdx:    int      # index into history while browsing; history.len = not browsing
+    histDraft:  string   # saved current input when browsing starts
+
     # hover link
     hoverLink: string
 
@@ -409,6 +414,10 @@ proc submitInput(app: var App) =
   app.buf.recomputeHeight(app.lineH)
   app.buf.scrollToBottom(app.winH - INPUT_H - SCROLL_PAD_B)
   toGame.send(GameMsg(kind: gmInput, raw: cmd))
+  if cmd.len > 0:
+    app.history.add cmd
+    app.histIdx  = app.history.len
+    app.histDraft = ""
   app.inputText   = ""
   app.inputCursor = 0
   app.inputScroll = 0
@@ -531,6 +540,8 @@ proc main*() =
           for line in msg.appendLines: app.buf.addLine(line)
         dirtyBuf = true
       of umRenderSprites: discard
+      of umQuit:
+        running = false
     if dirtyBuf:
       app.buf.recomputeHeight(app.lineH)
       app.buf.scrollToBottom(app.winH - INPUT_H - SCROLL_PAD_B)
@@ -653,6 +664,21 @@ proc main*() =
             while app.inputCursor < app.inputText.len and
                   (app.inputText[app.inputCursor].ord and 0xC0) == 0x80:
               inc app.inputCursor
+        of K_UP:
+          if app.history.len > 0:
+            if app.histIdx == app.history.len:
+              app.histDraft = app.inputText
+            app.histIdx = max(0, app.histIdx - 1)
+            app.inputText   = app.history[app.histIdx]
+            app.inputCursor = app.inputText.len
+            app.inputScroll = 0
+        of K_DOWN:
+          if app.histIdx < app.history.len:
+            app.histIdx += 1
+            app.inputText = if app.histIdx == app.history.len: app.histDraft
+                            else: app.history[app.histIdx]
+            app.inputCursor = app.inputText.len
+            app.inputScroll = 0
         of K_HOME: app.inputCursor = 0
         of K_END:  app.inputCursor = app.inputText.len
         of K_PAGEUP:

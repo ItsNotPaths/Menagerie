@@ -19,6 +19,9 @@ const
   fatigueMin = -100.0
   hungerMax  =  100.0
 
+## Wired by game_loop to call world.populateRoomQueue without a circular import.
+var onScheduleBoundary*: proc(state: var GameState)
+
 
 proc dayTick*(state: GameState): int =
   ## Current tick within the day (0–239).
@@ -87,4 +90,4 @@ proc passTicks*(state: var GameState; n: int) =
 
   # NPC schedule reload if a slot boundary was crossed
   if (prev div scheduleSlot) != (state.player.tick div scheduleSlot):
-    discard  # TODO Phase 7: re-evaluate NPC schedules
+    if onScheduleBoundary != nil: onScheduleBoundary(state)

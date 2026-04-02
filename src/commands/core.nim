@@ -22,6 +22,7 @@ type
     panelLines*:  seq[string]   ## replace right panel with these lines (empty = no change)
     panelAppend*: bool          ## append panelLines instead of replacing
     isError*:     bool
+    quit*:        bool          ## signal game thread to shut down
 
 
 proc ok*(lines: varargs[string]): CmdResult =

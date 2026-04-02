@@ -512,12 +512,21 @@ All wire-up points are marked `# SAVES_WIRE <operation>` in source — `grep -r 
 ### Phase 10 — Polish
 *Goal: feature parity with Python version.*
 
-- [ ] Journal system (in-game editable journal in the text panel; `journal` field already in PlayerState)
-- [ ] Command history (↑/↓ in input bar — SDL2 KeyDown already handled, just needs a `seq[string]` history buffer)
-- [ ] Menu context (`new`, `continue`, `load`, `exit`) — needs save system from Phase 9
-- [ ] NPC schedule reload at tick boundary (`clock.passTicks` triggers it)
-- [ ] Save versioning / migration
-- [ ] Screen-reader / accessibility pass
+- [x] `skills`, `levelup_skill`, `levelup_stat`, `levelup_perk`, `perks` commands — `cmd_universal.nim`
+- [x] `spells`, `spell_info`, `favourite_spell`, `unfavourite_spell` commands — `cmd_spells.nim`
+- [x] `exit` command — posts `umQuit` via `CmdResult.quit`; `ipc.nim` + `text_window.nim` handle shutdown
+- [x] Command history (↑/↓) — `text_window.nim`; `histDraft` restores in-progress input on ↓ past end
+- [x] NPC schedule reload at tick boundary — `clock.onScheduleBoundary` hook wired in `game_loop.nim`
+- [x] Main menu context (`ctxMenu`) — `new`, `continue`, `load` in `cmd_menu.nim` (ctxMenu-only); game starts in ctxMenu with splash; `new`/`continue`/`load` transition to ctxWorld with image
+- [ ] Journal system — UI design TBD before implementation
+- [ ] Screen-reader / accessibility pass (low priority)
+
+> **Notes:** `skills.toTitleCase` exported (`*`) for use in `cmd_universal.nim`.
+> `new`/`continue`/`load` moved from `cmd_universal` (registerAny) to `cmd_menu` (ctxMenu-only). `save` stays registerAny.
+> Menu splash emitted directly from `game_loop` init; `look` in ctxMenu re-shows the splash.
+> Save versioning dropped — no saves are being carried over.
+> `levelup_perk` takes optional `<spend_pick>` and `<duration>` args matching Python API.
+> `spells` command marks favourites with `*` (SpaceMono lacks `★`).
 
 ---
 

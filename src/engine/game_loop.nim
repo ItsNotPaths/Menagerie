@@ -23,6 +23,8 @@ import ../commands/cmd_combat
 import ../commands/cmd_dialogue
 import ../commands/cmd_sneak
 import ../commands/cmd_debug
+import ../commands/cmd_spells
+import ../commands/cmd_menu
 import ../ui/ipc
 
 
@@ -93,19 +95,21 @@ proc gameThread(contentDir: string) {.thread.} =
     initCmdDialogue()
     initCmdSneak()
     initCmdDebug()
+    initCmdSpells()
+    initCmdMenu()
 
     initApi()
 
-    # Clear stale working dir and start a fresh game
-    saves.clearWorkingOnLaunch()
-    var state = initGameState()
-    saves.newGame(state)
+    # Wire NPC schedule reload at tick-boundary crossing
+    clock.onScheduleBoundary = proc(s: var GameState) = world.populateRoomQueue(s)
 
-    # Send welcome message and initial look
-    toUi.send(UiMsg(kind: umPrint, line: "Welcome to Menagerie."))
-    toUi.send(UiMsg(kind: umPrint, line: ""))
-    let lookRes = dispatch("look", state)
-    pushResult(lookRes, state)
+    # Clear stale working dir; stay in ctxMenu — player chooses new/continue
+    saves.clearWorkingOnLaunch()
+    var state = initGameState()   # context = ctxMenu
+
+    # Show menu splash
+    for line in cmd_menu.menuLines():
+      toUi.send(UiMsg(kind: umPrint, line: line))
 
     # Dispatch loop — blocks until player sends a command
     while true:
@@ -116,6 +120,9 @@ proc gameThread(contentDir: string) {.thread.} =
         if raw.len == 0: continue
         let res = dispatch(raw, state)
         pushResult(res, state)
+        if res.quit:
+          toUi.send(UiMsg(kind: umQuit))
+          break
 
 
 # ── Public entry point ────────────────────────────────────────────────────────
