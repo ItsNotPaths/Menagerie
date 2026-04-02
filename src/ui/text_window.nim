@@ -87,6 +87,23 @@ type
     histIdx:    int      # index into history while browsing; history.len = not browsing
     histDraft:  string   # saved current input when browsing starts
 
+    # journal overlay
+    journalOpen:      bool
+    journalPages:     seq[string]      ## all pages (one string per page, \n-joined)
+    journalIdx:       int              ## current page index
+    journalLines:     seq[string]      ## current page split into edit lines
+    journalCurL:      int              ## body cursor: line index
+    journalCurC:      int              ## body cursor: byte offset
+    journalSearch:    string           ## search box text
+    journalSrchCur:   int              ## search box cursor byte offset
+    journalSrchFocus: bool             ## true = search box has keyboard focus
+    # button/region rects set by renderJournal, read by event handler
+    jBtnPrev:  tuple[x,y,w,h: int]
+    jBtnNext:  tuple[x,y,w,h: int]
+    jBtnClose: tuple[x,y,w,h: int]
+    jSrchBox:  tuple[x,y,w,h: int]
+    jBodyY:    int
+
     # hover link
     hoverLink: string
 
@@ -218,6 +235,161 @@ proc selectionText(app: App): string =
         s = s[min(a.charIdx, s.len) .. ^1]
       result.add s
     if li < b.lineIdx: result.add "\n"
+
+# ─── Journal helpers ─────────────────────────────────────────────────────────
+const JOURNAL_MAX_LINES = 24
+
+func inRect(x, y: int; r: tuple[x,y,w,h: int]): bool =
+  x >= r.x and x < r.x + r.w and y >= r.y and y < r.y + r.h
+
+proc journalSaveCurrentPage(app: var App) =
+  if app.journalIdx >= 0 and app.journalIdx < app.journalPages.len:
+    app.journalPages[app.journalIdx] = app.journalLines.join("\n")
+
+proc journalGotoPage(app: var App; idx: int) =
+  app.journalSaveCurrentPage()
+  app.journalIdx   = clamp(idx, 0, app.journalPages.high)
+  app.journalLines = app.journalPages[app.journalIdx].splitLines()
+  if app.journalLines.len == 0: app.journalLines = @[""]
+  app.journalCurL  = app.journalLines.high
+  app.journalCurC  = app.journalLines[app.journalCurL].len
+  app.journalSearch   = ""
+  app.journalSrchCur  = 0
+
+proc openJournalOverlay(app: var App; pages: seq[string]; idx: int) =
+  app.journalPages    = if pages.len > 0: pages else: @[""]
+  app.journalOpen     = true
+  app.journalSrchFocus = false
+  app.journalSearch   = ""
+  app.journalSrchCur  = 0
+  app.journalGotoPage(clamp(idx, 0, app.journalPages.high))
+
+proc closeJournalOverlay(app: var App) =
+  app.journalSaveCurrentPage()
+  toGame.send(GameMsg(kind: gmJournalSave, savedPages: app.journalPages))
+  app.journalOpen = false
+
+proc journalResultLines(app: App): seq[Line] =
+  ## Build search result lines as parsed Line objects so links work.
+  let q = app.journalSearch.toLowerAscii
+  result.add parseLine("Results for '" & app.journalSearch & "':")
+  result.add parseLine("")
+  var found = false
+  for i, page in app.journalPages:
+    if q in page.toLowerAscii:
+      let fl = page.splitLines()
+      let label = if fl.len > 0 and fl[0].strip.len > 0: fl[0].strip
+                  else: "(empty page)"
+      result.add parseLine("  [[Page " & $(i+1) & ": " & label &
+                            ":journal_goto " & $i & "]]")
+      found = true
+  if not found:
+    result.add parseLine("  No results.")
+
+proc renderJournalBtn(app: var App; r: tuple[x,y,w,h: int];
+                      label: string; hot: bool) =
+  app.ren.setColor(if hot: COL_SASH_HOT else: COL_SASH)
+  app.ren.fillRect(r.x, r.y, r.w, r.h)
+  let tx = r.x + (r.w - textWidth(app.font, label)) div 2
+  let ty = r.y + (r.h - app.fontH) div 2
+  discard app.ren.renderText(app.font, label, tx, ty, COL_FG)
+
+proc renderJournal(app: var App) =
+  let panelW = app.sashX
+  let toolH  = app.lineH + TEXT_PAD * 2
+  let btnH   = app.lineH
+  let btnY   = TEXT_PAD
+
+  var mx, my: cint
+  discard getMouseState(mx.addr, my.addr)
+
+  # ── Background ─────────────────────────────────────────────────────────────
+  app.ren.setColor(COL_BG)
+  app.ren.fillRect(0, 0, panelW, app.winH)
+  app.ren.setColor(COL_BG_INPUT)
+  app.ren.fillRect(0, 0, panelW, toolH)
+  app.ren.setColor(COL_SASH)
+  app.ren.fillRect(0, toolH, panelW, 1)
+
+  # ── [<] prev button ────────────────────────────────────────────────────────
+  let btnW  = textWidth(app.font, "<") + 8
+  let prevR = (x: TEXT_PAD, y: btnY, w: btnW, h: btnH)
+  app.jBtnPrev = prevR
+  app.renderJournalBtn(prevR, "<", inRect(mx.int, my.int, prevR))
+
+  # ── Page N / M ─────────────────────────────────────────────────────────────
+  let pageText = "Page " & $(app.journalIdx + 1) & " / " & $app.journalPages.len
+  let ptX = prevR.x + prevR.w + 6
+  let ptY = btnY + (btnH - app.fontH) div 2
+  discard app.ren.renderText(app.font, pageText, ptX, ptY, COL_FG)
+
+  # ── [>] next button ────────────────────────────────────────────────────────
+  let ptW   = textWidth(app.font, pageText)
+  let nextR = (x: ptX + ptW + 6, y: btnY, w: btnW, h: btnH)
+  app.jBtnNext = nextR
+  app.renderJournalBtn(nextR, ">", inRect(mx.int, my.int, nextR))
+
+  # ── [X] close button ───────────────────────────────────────────────────────
+  let closeBtnW = textWidth(app.font, "X") + 8
+  let closeR    = (x: panelW - TEXT_PAD - closeBtnW, y: btnY,
+                   w: closeBtnW, h: btnH)
+  app.jBtnClose = closeR
+  app.renderJournalBtn(closeR, "X", inRect(mx.int, my.int, closeR))
+
+  # ── Search box ─────────────────────────────────────────────────────────────
+  let srchLabelW = textWidth(app.font, "search:")
+  let srchBoxW   = 140
+  let srchBoxX   = closeR.x - TEXT_PAD - srchBoxW
+  let srchLabelX = srchBoxX - 4 - srchLabelW
+  let srchR      = (x: srchBoxX, y: btnY, w: srchBoxW, h: btnH)
+  app.jSrchBox = srchR
+  discard app.ren.renderText(app.font, "search:", srchLabelX, ptY, COL_FG_DIM)
+  app.ren.setColor(COL_BG)
+  app.ren.fillRect(srchR.x, srchR.y, srchR.w, srchR.h)
+  app.ren.setColor(if app.journalSrchFocus: COL_FG_LINK else: COL_SASH)
+  var srchBorder = rect(srchR.x.cint, srchR.y.cint, srchR.w.cint, srchR.h.cint)
+  discard app.ren.drawRect(srchBorder.addr)
+  let srchInnerX = srchR.x + 3
+  let srchInnerW = srchR.w - 6
+  var srchClip = rect(srchInnerX.cint, srchR.y.cint,
+                      srchInnerW.cint, srchR.h.cint)
+  discard app.ren.setClipRect(srchClip.addr)
+  discard app.ren.renderText(app.font, app.journalSearch, srchInnerX, ptY, COL_FG)
+  if app.journalSrchFocus and app.showCursor:
+    let curX = srchInnerX +
+               textWidth(app.font, app.journalSearch[0 ..< app.journalSrchCur])
+    app.ren.setColor(COL_CURSOR)
+    app.ren.fillRect(curX, ptY, 2, app.fontH)
+  discard app.ren.setClipRect(nil)
+
+  # ── Body ───────────────────────────────────────────────────────────────────
+  let bodyY = toolH + 1
+  app.jBodyY = bodyY
+  var bodyClip = rect(TEXT_PAD.cint, bodyY.cint,
+                      (panelW - TEXT_PAD).cint, (app.winH - bodyY).cint)
+  discard app.ren.setClipRect(bodyClip.addr)
+
+  if app.journalSearch.len > 0:
+    # Search results — render using same Line/Span loop as scrollback
+    let rlines = journalResultLines(app)
+    for li, line in rlines:
+      let lineY = bodyY + TEXT_PAD + li * app.lineH
+      var cx = TEXT_PAD
+      for span in line:
+        let col = if span.isLink: COL_FG_LINK else: COL_FG
+        cx += app.ren.renderText(app.font, span.text, cx, lineY, col)
+  else:
+    # Edit mode — plain lines with blinking cursor
+    for li, line in app.journalLines:
+      let lineY = bodyY + TEXT_PAD + li * app.lineH
+      if li == app.journalCurL and not app.journalSrchFocus and app.showCursor:
+        let curX = TEXT_PAD +
+                   textWidth(app.font, line[0 ..< app.journalCurC])
+        app.ren.setColor(COL_CURSOR)
+        app.ren.fillRect(curX, lineY, 2, app.fontH)
+      discard app.ren.renderText(app.font, line, TEXT_PAD, lineY, COL_FG)
+
+  discard app.ren.setClipRect(nil)
 
 # ─── Rendering ───────────────────────────────────────────────────────────────
 proc renderScrollbar(app: var App) =
@@ -364,7 +536,10 @@ proc renderSash(app: var App; hot: bool) =
 proc render(app: var App) =
   app.ren.setColor(COL_BG)
   discard app.ren.clear()
-  app.renderLeftPanel()
+  if app.journalOpen:
+    app.renderJournal()
+  else:
+    app.renderLeftPanel()
   app.renderRightPanel()
   var mx, my: cint
   discard getMouseState(mx.addr, my.addr)
@@ -427,6 +602,73 @@ proc handleLinkClick(app: var App; cmd: string) =
   app.inputCursor = cmd.len
   app.inputScroll = 0
   app.submitInput()
+
+proc handleInputKey(app: var App; ks: KeySym; ctrl: bool; nowTick: uint32) =
+  case ks.sym
+  of K_RETURN, K_KP_ENTER:
+    app.submitInput()
+    app.showCursor  = true
+    app.cursorBlink = nowTick
+  of K_BACKSPACE:
+    if app.inputCursor > 0:
+      var i = app.inputCursor - 1
+      while i > 0 and (app.inputText[i].ord and 0xC0) == 0x80: dec i
+      app.inputText.delete(i .. app.inputCursor - 1)
+      app.inputCursor = i
+      app.showCursor  = true
+      app.cursorBlink = nowTick
+  of K_DELETE:
+    if app.inputCursor < app.inputText.len:
+      var i = app.inputCursor + 1
+      while i < app.inputText.len and
+            (app.inputText[i].ord and 0xC0) == 0x80: inc i
+      app.inputText.delete(app.inputCursor .. i - 1)
+      app.showCursor  = true
+      app.cursorBlink = nowTick
+  of K_LEFT:
+    if app.inputCursor > 0:
+      dec app.inputCursor
+      while app.inputCursor > 0 and
+            (app.inputText[app.inputCursor].ord and 0xC0) == 0x80:
+        dec app.inputCursor
+  of K_RIGHT:
+    if app.inputCursor < app.inputText.len:
+      inc app.inputCursor
+      while app.inputCursor < app.inputText.len and
+            (app.inputText[app.inputCursor].ord and 0xC0) == 0x80:
+        inc app.inputCursor
+  of K_UP:
+    if app.history.len > 0:
+      if app.histIdx == app.history.len:
+        app.histDraft = app.inputText
+      app.histIdx = max(0, app.histIdx - 1)
+      app.inputText   = app.history[app.histIdx]
+      app.inputCursor = app.inputText.len
+      app.inputScroll = 0
+  of K_DOWN:
+    if app.histIdx < app.history.len:
+      app.histIdx += 1
+      app.inputText = if app.histIdx == app.history.len: app.histDraft
+                      else: app.history[app.histIdx]
+      app.inputCursor = app.inputText.len
+      app.inputScroll = 0
+  of K_HOME: app.inputCursor = 0
+  of K_END:  app.inputCursor = app.inputText.len
+  of K_PAGEUP:
+    app.buf.scrollY = max(0, app.buf.scrollY -
+                           (app.winH - INPUT_H - SCROLL_PAD_B))
+  of K_PAGEDOWN:
+    app.buf.scrollY = min(max(0, app.buf.totalH -
+                               (app.winH - INPUT_H - SCROLL_PAD_B)),
+                          app.buf.scrollY + (app.winH - INPUT_H - SCROLL_PAD_B))
+  of K_c:
+    if ctrl and app.hasSelection:
+      discard setClipboardText(app.selectionText().cstring)
+  of K_a:
+    if ctrl:
+      app.inputText   = ""
+      app.inputCursor = 0
+  else: discard
 
 proc hitTestLink(app: App; mx, my: int): string =
   ## Return the command of any link span under (mx, my), or "".
@@ -540,6 +782,8 @@ proc main*() =
           for line in msg.appendLines: app.buf.addLine(line)
         dirtyBuf = true
       of umRenderSprites: discard
+      of umJournalOpen:
+        app.openJournalOverlay(msg.jPages, msg.jIdx)
       of umQuit:
         running = false
     if dirtyBuf:
@@ -596,7 +840,39 @@ proc main*() =
       of MouseButtonUp:
         let mx = ev.button.x.int
         let my = ev.button.y.int
-        if ev.button.button == BUTTON_LEFT:
+        if app.journalOpen:
+          if ev.button.button == BUTTON_LEFT:
+            if inRect(mx, my, app.jBtnClose):
+              app.closeJournalOverlay()
+            elif inRect(mx, my, app.jBtnPrev):
+              if app.journalIdx > 0: app.journalGotoPage(app.journalIdx - 1)
+            elif inRect(mx, my, app.jBtnNext):
+              if app.journalIdx < app.journalPages.high:
+                app.journalGotoPage(app.journalIdx + 1)
+              else:
+                app.journalSaveCurrentPage()
+                app.journalPages.add ""
+                app.journalGotoPage(app.journalPages.high)
+            elif inRect(mx, my, app.jSrchBox):
+              app.journalSrchFocus = true
+            elif my >= app.jBodyY and app.journalSearch.len > 0:
+              # hit-test search result links
+              let li = (my - app.jBodyY - TEXT_PAD) div app.lineH
+              let rlines = journalResultLines(app)
+              if li >= 0 and li < rlines.len:
+                var cx = TEXT_PAD
+                for span in rlines[li]:
+                  let sw = textWidth(app.font, span.text)
+                  if span.isLink and mx >= cx and mx < cx + sw:
+                    let parts = strutils.splitWhitespace(span.cmd)
+                    if parts.len >= 2 and parts[0] == "journal_goto":
+                      try: app.journalGotoPage(parseInt(parts[1]))
+                      except ValueError: discard
+                    break
+                  cx += sw
+            else:
+              app.journalSrchFocus = false
+        elif ev.button.button == BUTTON_LEFT:
           if app.draggingSash:
             app.draggingSash = false
           elif my >= app.winH - INPUT_H and mx >= app.sashX - 74 and mx < app.sashX:
@@ -619,81 +895,141 @@ proc main*() =
 
       of TextInput:
         let s = $cast[cstring](ev.text.text[0].unsafeAddr)
-        app.inputText.insert(s, app.inputCursor)
-        app.inputCursor += s.len
-        app.showCursor   = true
-        app.cursorBlink  = nowTick
-        let promptW2 = textWidth(app.font, ">")
-        let inputX   = TEXT_PAD + promptW2 + 6
-        let inputW2  = app.sashX - TEXT_PAD * 2 - promptW2 - 6 - 36
-        app.clampInputScroll(inputX, inputW2)
+        if app.journalOpen:
+          if app.journalSrchFocus:
+            app.journalSearch.insert(s, app.journalSrchCur)
+            app.journalSrchCur += s.len
+          else:
+            var l = app.journalLines[app.journalCurL]
+            l.insert(s, app.journalCurC)
+            app.journalLines[app.journalCurL] = l
+            app.journalCurC += s.len
+        else:
+          app.inputText.insert(s, app.inputCursor)
+          app.inputCursor += s.len
+          let promptW2 = textWidth(app.font, ">")
+          let inputX   = TEXT_PAD + promptW2 + 6
+          let inputW2  = app.sashX - TEXT_PAD * 2 - promptW2 - 6 - 36
+          app.clampInputScroll(inputX, inputW2)
+        app.showCursor  = true
+        app.cursorBlink = nowTick
 
       of KeyDown:
         let ks   = ev.key.keysym
         let ctrl = (ks.modstate and KMOD_CTRL) != 0
-        case ks.sym
-        of K_RETURN, K_KP_ENTER:
-          app.submitInput()
+        if app.journalOpen:
           app.showCursor  = true
           app.cursorBlink = nowTick
-        of K_BACKSPACE:
-          if app.inputCursor > 0:
-            var i = app.inputCursor - 1
-            while i > 0 and (app.inputText[i].ord and 0xC0) == 0x80: dec i
-            app.inputText.delete(i .. app.inputCursor - 1)
-            app.inputCursor = i
-            app.showCursor  = true
-            app.cursorBlink = nowTick
-        of K_DELETE:
-          if app.inputCursor < app.inputText.len:
-            var i = app.inputCursor + 1
-            while i < app.inputText.len and
-                  (app.inputText[i].ord and 0xC0) == 0x80: inc i
-            app.inputText.delete(app.inputCursor .. i - 1)
-            app.showCursor  = true
-            app.cursorBlink = nowTick
-        of K_LEFT:
-          if app.inputCursor > 0:
-            dec app.inputCursor
-            while app.inputCursor > 0 and
-                  (app.inputText[app.inputCursor].ord and 0xC0) == 0x80:
-              dec app.inputCursor
-        of K_RIGHT:
-          if app.inputCursor < app.inputText.len:
-            inc app.inputCursor
-            while app.inputCursor < app.inputText.len and
-                  (app.inputText[app.inputCursor].ord and 0xC0) == 0x80:
-              inc app.inputCursor
-        of K_UP:
-          if app.history.len > 0:
-            if app.histIdx == app.history.len:
-              app.histDraft = app.inputText
-            app.histIdx = max(0, app.histIdx - 1)
-            app.inputText   = app.history[app.histIdx]
-            app.inputCursor = app.inputText.len
-            app.inputScroll = 0
-        of K_DOWN:
-          if app.histIdx < app.history.len:
-            app.histIdx += 1
-            app.inputText = if app.histIdx == app.history.len: app.histDraft
-                            else: app.history[app.histIdx]
-            app.inputCursor = app.inputText.len
-            app.inputScroll = 0
-        of K_HOME: app.inputCursor = 0
-        of K_END:  app.inputCursor = app.inputText.len
-        of K_PAGEUP:
-          app.buf.scrollY = max(0, app.buf.scrollY - (app.winH - INPUT_H - SCROLL_PAD_B))
-        of K_PAGEDOWN:
-          app.buf.scrollY = min(max(0, app.buf.totalH - (app.winH - INPUT_H - SCROLL_PAD_B)),
-                                app.buf.scrollY + (app.winH - INPUT_H - SCROLL_PAD_B))
-        of K_c:
-          if ctrl and app.hasSelection:
-            discard setClipboardText(app.selectionText().cstring)
-        of K_a:
-          if ctrl:
-            app.inputText   = ""
-            app.inputCursor = 0
-        else: discard
+          case ks.sym
+          of K_ESCAPE:
+            app.closeJournalOverlay()
+          of K_TAB:
+            app.journalSrchFocus = not app.journalSrchFocus
+          of K_RETURN, K_KP_ENTER:
+            if app.journalSrchFocus:
+              app.journalSrchFocus = false
+            elif app.journalLines.len < JOURNAL_MAX_LINES:
+              let l      = app.journalLines[app.journalCurL]
+              let before = l[0 ..< app.journalCurC]
+              let after  = l[app.journalCurC .. ^1]
+              app.journalLines[app.journalCurL] = before
+              app.journalLines.insert(after, app.journalCurL + 1)
+              inc app.journalCurL
+              app.journalCurC = 0
+          of K_BACKSPACE:
+            if app.journalSrchFocus:
+              if app.journalSrchCur > 0:
+                var i = app.journalSrchCur - 1
+                while i > 0 and
+                      (app.journalSearch[i].ord and 0xC0) == 0x80: dec i
+                app.journalSearch.delete(i .. app.journalSrchCur - 1)
+                app.journalSrchCur = i
+            else:
+              if app.journalCurC > 0:
+                var l = app.journalLines[app.journalCurL]
+                var i = app.journalCurC - 1
+                while i > 0 and (l[i].ord and 0xC0) == 0x80: dec i
+                l.delete(i .. app.journalCurC - 1)
+                app.journalLines[app.journalCurL] = l
+                app.journalCurC = i
+              elif app.journalCurL > 0:
+                let prev = app.journalLines[app.journalCurL - 1]
+                app.journalCurC = prev.len
+                app.journalLines[app.journalCurL - 1] =
+                  prev & app.journalLines[app.journalCurL]
+                app.journalLines.delete(app.journalCurL)
+                dec app.journalCurL
+          of K_DELETE:
+            if not app.journalSrchFocus:
+              let l = app.journalLines[app.journalCurL]
+              if app.journalCurC < l.len:
+                var i = app.journalCurC + 1
+                while i < l.len and (l[i].ord and 0xC0) == 0x80: inc i
+                var ml = l
+                ml.delete(app.journalCurC .. i - 1)
+                app.journalLines[app.journalCurL] = ml
+              elif app.journalCurL < app.journalLines.high:
+                app.journalLines[app.journalCurL] &=
+                  app.journalLines[app.journalCurL + 1]
+                app.journalLines.delete(app.journalCurL + 1)
+          of K_LEFT:
+            if app.journalSrchFocus:
+              if app.journalSrchCur > 0: dec app.journalSrchCur
+            else:
+              if app.journalCurC > 0:
+                dec app.journalCurC
+                while app.journalCurC > 0 and
+                      (app.journalLines[app.journalCurL][app.journalCurC].ord and 0xC0) == 0x80:
+                  dec app.journalCurC
+              elif app.journalCurL > 0:
+                dec app.journalCurL
+                app.journalCurC = app.journalLines[app.journalCurL].len
+          of K_RIGHT:
+            if app.journalSrchFocus:
+              if app.journalSrchCur < app.journalSearch.len:
+                inc app.journalSrchCur
+            else:
+              let l = app.journalLines[app.journalCurL]
+              if app.journalCurC < l.len:
+                inc app.journalCurC
+                while app.journalCurC < l.len and
+                      (l[app.journalCurC].ord and 0xC0) == 0x80:
+                  inc app.journalCurC
+              elif app.journalCurL < app.journalLines.high:
+                inc app.journalCurL
+                app.journalCurC = 0
+          of K_UP:
+            if not app.journalSrchFocus and app.journalCurL > 0:
+              dec app.journalCurL
+              app.journalCurC =
+                min(app.journalCurC, app.journalLines[app.journalCurL].len)
+          of K_DOWN:
+            if not app.journalSrchFocus and
+               app.journalCurL < app.journalLines.high:
+              inc app.journalCurL
+              app.journalCurC =
+                min(app.journalCurC, app.journalLines[app.journalCurL].len)
+          of K_HOME:
+            if app.journalSrchFocus: app.journalSrchCur = 0
+            else: app.journalCurC = 0
+          of K_END:
+            if app.journalSrchFocus:
+              app.journalSrchCur = app.journalSearch.len
+            else:
+              app.journalCurC = app.journalLines[app.journalCurL].len
+          of K_PAGEUP:
+            if app.journalIdx > 0:
+              app.journalGotoPage(app.journalIdx - 1)
+          of K_PAGEDOWN:
+            if app.journalIdx < app.journalPages.high:
+              app.journalGotoPage(app.journalIdx + 1)
+            else:
+              app.journalSaveCurrentPage()
+              app.journalPages.add ""
+              app.journalGotoPage(app.journalPages.high)
+          else: discard
+        else:
+          app.handleInputKey(ks, ctrl, nowTick)
 
       else: discard
 

@@ -15,7 +15,8 @@ type
     umStats,         ## replace HUD stats ("Label: value" strings)
     umPanelReplace,  ## replace scrollback with fixed panel lines
     umPanelAppend,   ## append lines to the scrollback panel
-    umQuit           ## shut down the SDL2 window
+    umQuit,          ## shut down the SDL2 window
+    umJournalOpen    ## open the journal overlay
 
   SpriteEntry* = object
     path*:    string
@@ -37,12 +38,17 @@ type
     of umPanelAppend:
       appendLines*: seq[string]
     of umQuit: discard
+    of umJournalOpen:
+      jPages*: seq[string]   ## one string per page
+      jIdx*:   int           ## page to open to
 
-  GameMsgKind* = enum gmInput
+  GameMsgKind* = enum gmInput, gmJournalSave
   GameMsg* = object
     case kind*: GameMsgKind
     of gmInput:
       raw*: string
+    of gmJournalSave:
+      savedPages*: seq[string]
 
 var
   toUi*:   Channel[UiMsg]

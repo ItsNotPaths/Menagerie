@@ -518,9 +518,7 @@ All wire-up points are marked `# SAVES_WIRE <operation>` in source — `grep -r 
 - [x] Command history (↑/↓) — `text_window.nim`; `histDraft` restores in-progress input on ↓ past end
 - [x] NPC schedule reload at tick boundary — `clock.onScheduleBoundary` hook wired in `game_loop.nim`
 - [x] Main menu context (`ctxMenu`) — `new`, `continue`, `load` in `cmd_menu.nim` (ctxMenu-only); game starts in ctxMenu with splash; `new`/`continue`/`load` transition to ctxWorld with image
-- [ ] Journal system — UI design TBD before implementation
-- [ ] Screen-reader / accessibility pass (low priority)
-
+- [x] Journal system — `cmd_journal.nim`; overlay replaces left panel; toolbar: `[<] Page N/M [>]  search:[____]  [X]`; live search results as clickable `[[Page N: ...]]` links (reuses Line/Span pipeline); full multi-line editing; PageDown on last page adds new page; Esc/[X] saves+closes; Tab toggles search/body focus
 > **Notes:** `skills.toTitleCase` exported (`*`) for use in `cmd_universal.nim`.
 > `new`/`continue`/`load` moved from `cmd_universal` (registerAny) to `cmd_menu` (ctxMenu-only). `save` stays registerAny.
 > Menu splash emitted directly from `game_loop` init; `look` in ctxMenu re-shows the splash.

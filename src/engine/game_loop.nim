@@ -25,6 +25,7 @@ import ../commands/cmd_sneak
 import ../commands/cmd_debug
 import ../commands/cmd_spells
 import ../commands/cmd_menu
+import ../commands/cmd_journal
 import ../ui/ipc
 
 
@@ -97,6 +98,7 @@ proc gameThread(contentDir: string) {.thread.} =
     initCmdDebug()
     initCmdSpells()
     initCmdMenu()
+    initCmdJournal()
 
     initApi()
 
@@ -120,9 +122,18 @@ proc gameThread(contentDir: string) {.thread.} =
         if raw.len == 0: continue
         let res = dispatch(raw, state)
         pushResult(res, state)
+        if res.openJournal:
+          let j   = state.player.journal
+          let idx = if j.len > 0: j.len - 1 else: 0
+          toUi.send(UiMsg(kind: umJournalOpen,
+                          jPages: (if j.len > 0: j else: @[""]),
+                          jIdx:   idx))
         if res.quit:
           toUi.send(UiMsg(kind: umQuit))
           break
+      of gmJournalSave:
+        state.player.journal = msg.savedPages
+        saves.flushPlayer(state)
 
 
 # ── Public entry point ────────────────────────────────────────────────────────

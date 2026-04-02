@@ -23,6 +23,7 @@ type
     panelAppend*: bool          ## append panelLines instead of replacing
     isError*:     bool
     quit*:        bool          ## signal game thread to shut down
+    openJournal*: bool          ## signal game thread to send umJournalOpen
 
 
 proc ok*(lines: varargs[string]): CmdResult =
