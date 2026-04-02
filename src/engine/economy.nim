@@ -87,9 +87,7 @@ proc shopLines*(state: GameState): seq[string] =
 
   var lines: seq[string]
   if seen.len > 0:
-    var cats: seq[string]
-    for c in seen: cats.add &"[[{c.capitalizeAscii}:shop {c}]]"
-    lines.add "  " & cats.join("   ")
+    for c in seen: lines.add &"  [[{c.capitalizeAscii}:shop {c}]]"
   else:
     lines.add "  (Nothing for sale.)"
 

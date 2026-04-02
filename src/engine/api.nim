@@ -29,7 +29,7 @@
 ##   pause                                        injects __PAUSE__ sentinel
 
 import std/[json, options, strformat, strutils, sequtils, tables]
-import state, content, items, api_types
+import state, content, items, api_types, scripting
 import conditions as cond
 import armor      as armormod
 import modifiers  as mods
@@ -277,9 +277,14 @@ proc runCommand*(state: var GameState; cmd: string;
                  selfId: string): seq[string] =
   ## Parse and dispatch a single content command string.
   ## selfId resolves "enemy.self" selectors ("player" | enemy id | "").
-  let parts = cmd.strip.splitWhitespace
+  ## If cmd ends with ".lua" it is treated as a script filename and dispatched
+  ## to the Lua engine rather than parsed as a verb.
+  let trimmed = cmd.strip
+  if trimmed.endsWith(".lua"):
+    return scripting.runScript(state, trimmed, selfId)
+  let parts = trimmed.splitWhitespace
   if parts.len == 0: return
-  let verb = parts[0].toLowerAscii
+  let verb  = parts[0].toLowerAscii
   case verb
   of "damage":
     # damage <target> <amount> [stat]

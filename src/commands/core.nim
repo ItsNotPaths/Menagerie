@@ -138,6 +138,7 @@ proc dispatch*(raw: string; state: var GameState): CmdResult =
 
   if result.ticks > 0:
     passTicks(state, result.ticks)
+    # SAVES_WIRE autosave
 
   # After a combat-ending command restore the correct image
   if ctx == ctxCombat and state.context != ctxCombat and result.imagePath == "":

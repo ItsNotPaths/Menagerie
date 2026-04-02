@@ -457,19 +457,38 @@ step in `dispatch` before the table lookup.
 ### Phase 8 — Stealth & Scripting
 *Goal: sneak mode works; Lua scripts drive content events.*
 
-- [ ] `src/engine/sneak.nim` — stealth rolls, pickpocket, rotate target, stealth attack
-- [ ] Wire Lua scripts into the event pipeline
-  - `on_command`, `on_start` already work in the shell
-  - Add: `on_kill`, `on_effect_received`, `on_level_up`, etc.
-  - Expose the full `api.*` command set to Lua as globals
-- [ ] Replace Python flat-string `scripts.py` sandbox with Lua — already architecturally done
+- [x] `src/engine/sneak.nim` — stealth rolls, pickpocket, rotate target, stealth attack
+- [x] `src/commands/cmd_sneak.nim` — `sneak`, `pickpocket`, `sneak_item`, `steal`, `stealth_attack`
+- [x] `combat.weaponStats` exported for use by sneak module
+- [x] Wire Lua scripts into the event pipeline
+  - `api.runCommand` detects `.lua` suffix and dispatches to `scripting.runScript`
+  - `engine.cmd(str)` exposed to Lua — routes any command string through `api.runCommand`
+  - `engine.print(str)` / Lua `print()` output collected into result lines during script execution
+  - `modifiers.dispatchHandler` JString case routes through `apiRunCommand` (handles both commands and `.lua`)
+  - `combat.killEnemy` resolves `death_script` field via `api.runCommand`
+  - `scripting.passC` path-with-spaces bug fixed (was latent; Lua not compiled in main path since Phase 3)
+- [x] Replace Python flat-string `scripts.py` sandbox with Lua — architecturally done; `scriptsDir` set to `content/scripts/`
 
 ### Phase 9 — Saves
 *Goal: save and load a full game.*
 
 - [ ] `src/engine/saves.nim` — `flushToWorking`, `zipWorking`, `loadFromWorking`, `clearWorkingOnLaunch`, autosave rotation
-- [ ] `src/commands/cmd_universal.nim` — `save`, `load`, `new`, `continue`
+- [ ] `src/commands/cmd_universal.nim` — `save`, `load`, `new`, `continue` (stubs already registered)
 - [ ] Verify dirty tile write-through (`flushDirty` on each mutation)
+
+All wire-up points are marked `# SAVES_WIRE <operation>` in source — `grep -r SAVES_WIRE src/` finds them all.
+
+| Marker | Operation | Files |
+|---|---|---|
+| `flush_variables` | Persist `state.variables` after bounty / spawn counter writes | `combat.nim`, `sneak.nim`, `world.nim` |
+| `flush_npc_states` | Persist `state.npcStates` after hostile / health / alive / nemesis writes | `combat.nim`, `sneak.nim`, `world.nim` |
+| `flush_dirty` | Persist dirty tile loot drops | `world.nim` |
+| `flush_player` | Persist full player state after death-respawn and sleep (rest anchor) | `combat.nim`, `cmd_universal.nim` |
+| `autosave` | Tick-boundary autosave trigger (fires after every time-costing command) | `commands/core.nim` |
+| `on_save` | Player-triggered manual save | `cmd_universal.nim` |
+| `on_load` | Load from save file | `cmd_universal.nim` |
+| `on_new_game` | Clear save and start fresh | `cmd_universal.nim` |
+| `on_continue` | Load most recent save on launch | `cmd_universal.nim` |
 
 ### Phase 10 — Polish
 *Goal: feature parity with Python version.*

@@ -270,7 +270,7 @@ proc playerResourceLine*(state: GameState): string =
   &"  Health {int(p.health):>3}   Stamina {int(p.stamina):>3}   Focus {int(p.focus):>3}"
 
 
-proc weaponStats(player: PlayerState): (float, float) =
+proc weaponStats*(player: PlayerState): (float, float) =
   ## (totalDamage, totalStaminaCost) from equipped mainhand + offhand.
   ## Falls back to base constants when nothing is equipped.
   var totalDmg  = 0.0
@@ -367,9 +367,11 @@ proc killEnemy(state: var GameState; enemy: CombatEnemy): seq[string] =
   if faction != "" and not enemy.data{"is_hostile"}.getBool(false):
     let prev = state.variables.getOrDefault(&"bounty_{faction}", %0).getInt(0)
     state.variables[&"bounty_{faction}"] = %(prev + 3)
-    # TODO Phase 9: saves.flushVariables(state)
-  # TODO Phase 9: saves.flushNpcStates(state)
-  # TODO Phase 8: run death_script via scripting module
+    # SAVES_WIRE flush_variables
+  # SAVES_WIRE flush_npc_states
+  let deathScript = enemy.data{"death_script"}.getStr
+  if deathScript != "":
+    result &= api.runCommand(state, deathScript, enemy.id)
   # fire_event "kill" — context: _last_kill_type, _last_kill_faction, _kills_this_combat
   result &= mods.fireEvent(state, "kill", enemy.id)
   result   # also returns dropped as display names via the caller's count logic
@@ -382,6 +384,8 @@ proc killEnemyDropped(state: var GameState; enemy: CombatEnemy): (seq[string], s
   if faction != "" and not enemy.data{"is_hostile"}.getBool(false):
     let prev = state.variables.getOrDefault(&"bounty_{faction}", %0).getInt(0)
     state.variables[&"bounty_{faction}"] = %(prev + 3)
+    # SAVES_WIRE flush_variables
+  # SAVES_WIRE flush_npc_states
   result[1] = dropped
   result[0] &= mods.fireEvent(state, "kill", enemy.id)
 
@@ -415,6 +419,7 @@ proc applyNemesis(state: var GameState; enemyId: string): string =
   if enemyId in state.npcStates and state.npcStates[enemyId].kind == JObject:
     state.npcStates[enemyId]["label_override"] = %newLabel
     state.npcStates[enemyId]["nemesis"]        = %true
+    # SAVES_WIRE flush_npc_states
   # Update label in active combat
   if state.combat.isSome:
     var cs = state.combat.get
@@ -441,7 +446,7 @@ proc playerDeath(state: var GameState; killerId: string): seq[string] =
   if killerId != "":
     let newLabel = applyNemesis(state, killerId)
     result.add &"The {newLabel} looms over your body."
-    # TODO Phase 9: saves.flushNpcStates(state)
+    # SAVES_WIRE flush_npc_states
   # Respawn: advance time, restore minimal stats, teleport to last rest
   clock.passTicks(state, gvInt("death_respawn_ticks", 30))
   p.health  = gvFloat("death_respawn_health",  10.0)
@@ -451,13 +456,13 @@ proc playerDeath(state: var GameState; killerId: string): seq[string] =
   if p.lastRestRoom != "":
     p.position     = p.lastRestPosition
     p.currentRoom  = p.lastRestRoom
-    # TODO Phase 9: saves.flushState(state)
+    # SAVES_WIRE flush_player
     let tile = world.getTile(state, p.position[0], p.position[1])
     state.context = if tile.tileType == "town": ctxTown else: ctxDungeon
     world.populateRoomQueue(state)
   else:
     # Never slept — leave to the world map
-    # TODO Phase 9: saves.flushState(state)
+    # SAVES_WIRE flush_player
     result &= world.leaveLocation(state)
   result.add "You wake up, battered and disoriented."
   result &= world.currentLines(state)
@@ -1159,12 +1164,12 @@ proc initiateAggression*(state: var GameState): seq[string] =
 
   if npcId in state.npcStates and state.npcStates[npcId].kind == JObject:
     state.npcStates[npcId]["hostile"] = %true
-    # TODO Phase 9: saves.flushNpcStates(state)
+    # SAVES_WIRE flush_npc_states
 
   if faction != "":
     let prev = state.variables.getOrDefault(&"bounty_{faction}", %0).getInt(0)
     state.variables[&"bounty_{faction}"] = %(prev + 1)
-    # TODO Phase 9: saves.flushVariables(state)
+    # SAVES_WIRE flush_variables
 
   world.populateRoomQueue(state)
   result.add &"You attack {label}!"
@@ -1187,7 +1192,7 @@ proc doFlee*(state: var GameState): seq[string] =
       state.npcStates[e.id]["health"]   = %e.health
       state.npcStates[e.id]["row"]      = %e.row
       state.npcStates[e.id]["distance"] = %e.distance
-  # TODO Phase 9: saves.flushNpcStates(state)
+  # SAVES_WIRE flush_npc_states
 
   let (x, y) = state.player.position
   let tile   = world.getTile(state, x, y)
@@ -1209,7 +1214,7 @@ proc doFlee*(state: var GameState): seq[string] =
     for f in factions:
       let prev = state.variables.getOrDefault(&"bounty_{f}", %0).getInt(0)
       state.variables[&"bounty_{f}"] = %(prev + 1)
-    # TODO Phase 9: saves.flushVariables(state)
+    # SAVES_WIRE flush_variables
     state.combat = none(CombatState)
     result.add "You flee into the open."
     result &= fleeLn

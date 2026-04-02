@@ -323,8 +323,11 @@ proc renderRightPanel(app: var App) =
   app.ren.fillRect(panelX, 0, panelW, app.winH)
 
   if app.bgTex != nil:
+    var clip = rect(panelX.cint, 0.cint, panelW.cint, app.winH.cint)
+    discard app.ren.setClipRect(clip.addr)
     var dst = app.bgRect
     discard app.ren.copy(app.bgTex, nil, dst.addr)
+    discard app.ren.setClipRect(nil)
 
   if app.hudStats.len > 0:
     let hx   = panelX + HUD_MARGIN
@@ -373,18 +376,14 @@ proc loadBgImage(app: var App; path: string) =
   freeSurface(surf)
 
 proc recomputeBgRect(app: var App) =
-  ## Fit the background image to the right panel, centred, preserving aspect ratio.
+  ## Scale image to window height (aspect preserved), centre within right panel.
+  ## Overflow left/right is cropped by the clip rect in renderRightPanel.
   if app.bgTex == nil: return
-  let panelX  = app.sashX + SASH_W
-  let panelW  = app.winW - panelX
-  let aspect  = app.bgW.float / app.bgH.float
-  var dw = (app.winH.float * aspect).int
-  var dh = app.winH
-  if dw > panelW:
-    dw = panelW
-    dh = (panelW.float / aspect).int
-  app.bgRect = rect((panelX + (panelW - dw) div 2).cint,
-                    ((app.winH - dh) div 2).cint,
+  let panelX = app.sashX + SASH_W
+  let panelW = app.winW - panelX
+  let dh     = app.winH
+  let dw     = (app.bgW.float * app.winH.float / app.bgH.float).int
+  app.bgRect = rect((panelX + (panelW - dw) div 2).cint, 0.cint,
                     dw.cint, dh.cint)
 
 # ─── Input handling ──────────────────────────────────────────────────────────

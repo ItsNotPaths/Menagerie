@@ -65,6 +65,7 @@ proc cmdSleep(state: var GameState; args: seq[string]): CmdResult =
   state.player.gold -= cost
   state.player.lastRestPosition = state.player.position
   state.player.lastRestRoom     = state.player.currentRoom
+  # SAVES_WIRE flush_player
   let restorePH = gvFloat("fatigue_sleep_restore_per_hour", 60.0)
   state.player.fatigue = min(100.0, state.player.fatigue + float(hours) * restorePH)
   let suf = if hours == 1: "" else: "s"
@@ -82,9 +83,31 @@ proc cmdStatus(state: var GameState; args: seq[string]): CmdResult =
   )
 
 
+# ── Save / load stubs (Phase 9) ───────────────────────────────────────────────
+# SAVES_WIRE on_save
+proc cmdSave(state: var GameState; args: seq[string]): CmdResult =
+  ok("(save not yet implemented)")  # Phase 9: saves.flushToWorking(state); saves.zipWorking()
+
+# SAVES_WIRE on_load
+proc cmdLoad(state: var GameState; args: seq[string]): CmdResult =
+  ok("(load not yet implemented)")  # Phase 9: saves.loadFromWorking(state)
+
+# SAVES_WIRE on_new_game
+proc cmdNew(state: var GameState; args: seq[string]): CmdResult =
+  ok("(new game not yet implemented)")  # Phase 9: saves.clearWorking(); initGameState()
+
+# SAVES_WIRE on_continue
+proc cmdContinue(state: var GameState; args: seq[string]): CmdResult =
+  ok("(continue not yet implemented)")  # Phase 9: saves.loadFromWorking(state) if save exists
+
+
 proc initCmdUniversal*() =
-  registerAny("help",   cmdHelp)
-  registerAny("wait",   cmdWait)
-  registerAny("status", cmdStatus)
+  registerAny("help",     cmdHelp)
+  registerAny("wait",     cmdWait)
+  registerAny("status",   cmdStatus)
+  registerAny("save",     cmdSave)
+  registerAny("load",     cmdLoad)
+  registerAny("new",      cmdNew)
+  registerAny("continue", cmdContinue)
   register("sleep", ctxTown,    cmdSleep)
   register("sleep", ctxDungeon, cmdSleep)

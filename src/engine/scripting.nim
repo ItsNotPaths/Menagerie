@@ -2,13 +2,14 @@
 ## Embeds Lua 5.4 via the amalgamation in vendor/lua/src/ — no external dependency.
 
 import strutils, os
+import state, api_types
 
 # Compile the full Lua runtime into the binary.
 # MAKE_LIB suppresses the lua/luac standalone main() symbols.
 # passC -I must be absolute (passed verbatim to gcc); header: paths use one ..
 # because Nim adds -I<srcDir> to gcc and that makes ../vendor/... resolve correctly.
 const luaSrcDir = currentSourcePath.parentDir / ".." / ".." / "vendor" / "lua" / "src"
-{.passC: "-DMAKE_LIB -I" & luaSrcDir.}
+{.passC: "-DMAKE_LIB -I\"" & luaSrcDir & "\"".}
 {.compile: "../../vendor/lua/src/onelua.c".}
 
 # ─── Lua C API — types ───────────────────────────────────────────────────────
@@ -98,17 +99,35 @@ type
 # Acceptable for a single-engine application.
 var gEngine*: ptr ScriptEngine = nil
 
+# ─── Script execution context ────────────────────────────────────────────────
+# Set before runScript, cleared after.  Lets cdecl callbacks reach game state.
+var scriptsDir*:    string = ""
+var gScriptState:   ptr GameState = nil
+var gScriptSelfId:  string = ""
+var gScriptLines:   seq[string] = @[]
+
 proc luaPrintImpl(L: LuaStatePtr): cint {.cdecl.} =
   ## C callback registered as Lua's print() and engine.print().
+  ## Routes to gScriptLines during script execution, onPrint otherwise.
   let n = lua_gettop(L)
   var parts: seq[string]
   for i in 1 .. n:
     parts.add luaToString(L, i.cint)
   let msg = parts.join("\t")
-  if gEngine != nil and gEngine.onPrint != nil:
+  if gScriptState != nil:
+    gScriptLines.add msg
+  elif gEngine != nil and gEngine.onPrint != nil:
     gEngine.onPrint(msg)
   else:
     echo "[lua] ", msg
+  return 0
+
+proc luaEngineCmdImpl(L: LuaStatePtr): cint {.cdecl.} =
+  ## engine.cmd(str) — dispatch a content command string from Lua.
+  ## Output lines are appended to gScriptLines.
+  let cmd = luaToString(L, 1)
+  if gScriptState != nil and apiRunCommand != nil:
+    gScriptLines &= apiRunCommand(gScriptState[], cmd, gScriptSelfId)
   return 0
 
 proc initScriptEngine*(eng: var ScriptEngine; onPrint: PrintCallback) =
@@ -125,6 +144,8 @@ proc initScriptEngine*(eng: var ScriptEngine; onPrint: PrintCallback) =
   lua_newtable(eng.L)
   lua_pushcclosure(eng.L, luaPrintImpl, 0)
   lua_setfield(eng.L, -2, "print")
+  lua_pushcclosure(eng.L, luaEngineCmdImpl, 0)
+  lua_setfield(eng.L, -2, "cmd")
   lua_setglobal(eng.L, "engine")
 
 proc closeScriptEngine*(eng: var ScriptEngine) =
@@ -160,3 +181,21 @@ proc callGlobal*(eng: var ScriptEngine; name: string;
   let ret = luaToString(eng.L, -1)
   lua_settop(eng.L, -2)
   return ret != "false"
+
+proc runScript*(state: var GameState; scriptName, selfId: string): seq[string] =
+  ## Resolve scriptName relative to scriptsDir, execute it, and return any
+  ## output lines produced via engine.cmd / engine.print / print inside Lua.
+  ## selfId resolves "enemy.self" selectors within engine.cmd calls.
+  if gEngine == nil: return
+  let path = if scriptsDir != "": scriptsDir / scriptName else: scriptName
+  if not fileExists(path):
+    if gEngine.onPrint != nil:
+      gEngine.onPrint("[lua] script not found: " & path)
+    return
+  gScriptState  = state.addr
+  gScriptSelfId = selfId
+  gScriptLines  = @[]
+  discard gEngine[].runFile(path)
+  gScriptState = nil
+  result       = gScriptLines
+  gScriptLines = @[]

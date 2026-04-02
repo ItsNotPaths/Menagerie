@@ -126,9 +126,7 @@ proc dispatchHandler(state: var GameState; handler: JsonNode;
     for entry in handler:
       result &= apiRunCommand(state, entry.getStr, selfId)
   of JString:
-    let fname = handler.getStr
-    if fname.endsWith(".lua"):
-      discard   # TODO Phase 8: scripting.callLua(fname, state)
+    result &= apiRunCommand(state, handler.getStr, selfId)
   else: discard
 
 

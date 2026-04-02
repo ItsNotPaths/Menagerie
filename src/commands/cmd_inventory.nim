@@ -160,10 +160,9 @@ proc cmdInventory(state: var GameState; args: seq[string]): CmdResult =
       let qty   = if count > 1: &"  ×{count}" else: ""
       lines.add &"  ★ [[{name}:inventory item {iid}]]{qty}"
 
-  let catRow = "  " & invCategories.mapIt(
-    &"[[{it.capitalizeAscii}:inventory {it}]]").join("   ")
   lines.add ""
-  lines.add catRow
+  for c in invCategories:
+    lines.add &"  [[{c.capitalizeAscii}:inventory {c}]]"
 
   let eqLines = equippedLines(p)
   if eqLines.len > 0:

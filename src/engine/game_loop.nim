@@ -11,6 +11,7 @@ import content
 import world
 import clock
 import api
+import scripting
 import settings
 import ../commands/core
 import ../commands/cmd_world
@@ -19,6 +20,8 @@ import ../commands/cmd_universal
 import ../commands/cmd_inventory
 import ../commands/cmd_combat
 import ../commands/cmd_dialogue
+import ../commands/cmd_sneak
+import ../commands/cmd_debug
 import ../ui/ipc
 
 
@@ -74,6 +77,12 @@ proc gameThread(contentDir: string) {.thread.} =
     loadContent(contentDir)
     buildWorldDefIndex()
 
+    # Init Lua scripting engine
+    scripting.scriptsDir = contentDir / "scripts"
+    var scriptEng: ScriptEngine
+    proc onLuaPrint(msg: string) = toUi.send(UiMsg(kind: umPrint, line: msg))
+    scripting.initScriptEngine(scriptEng, onLuaPrint)
+
     # Register command handlers
     initCmdUniversal()
     initCmdWorld()
@@ -81,6 +90,8 @@ proc gameThread(contentDir: string) {.thread.} =
     initCmdInventory()
     initCmdCombat()
     initCmdDialogue()
+    initCmdSneak()
+    initCmdDebug()
 
     initApi()
 

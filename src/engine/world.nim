@@ -345,7 +345,7 @@ proc spawnTileEnemies(state: var GameState; tileKey: string; tileDef: TileDef; t
       let eId = enemyType.getStr
       if eId == "": continue
       let counter = state.variables.getOrDefault("_npc_spawn_counter", newJInt(0)).getInt + 1
-      state.variables["_npc_spawn_counter"] = %counter
+      state.variables["_npc_spawn_counter"] = %counter   # SAVES_WIRE flush_variables
       let instanceId = &"{eId}_{counter}"
       let npc = content.getNpc(eId)
       let baseHealth = if npc.id != "": npc.health else: 20.0
@@ -575,6 +575,7 @@ proc dropEntityLoot*(state: var GameState; entityId: string): seq[string] =
   if entityId in state.npcStates:
     if state.npcStates[entityId].kind == JObject:
       state.npcStates[entityId]["alive"] = %false
+      # SAVES_WIRE flush_npc_states
 
   let loc    = state.npcStates.getOrDefault(entityId, newJNull())
   let baseId = if loc.kind == JObject: loc{"spawned_from"}.getStr(entityId) else: entityId
@@ -616,7 +617,7 @@ proc dropEntityLoot*(state: var GameState; entityId: string): seq[string] =
       state.dirty[key]["items"] = newJArray()
     for iid in dropped:
       state.dirty[key]["items"].add %iid
-    # TODO Phase 9: saves.flushDirty(state, key)
+    # SAVES_WIRE flush_dirty
 
   dropped
 
