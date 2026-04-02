@@ -5,11 +5,11 @@
 ##
 ## Flow
 ## ────
-## 1. openDialogue(state, npcId)  — evaluate opening_conditions, print greeting,
-##                                  list visible topics, set _talking_to variable
-## 2. selectTopic(state, topicId) — apply variable_changes, return dialogue lines
-## 3. endDialogue(state)          — clear _talking_to / _active_shop
+## 1. openDialogue(state, npcId)         — evaluate opening_conditions, print
+##                                         greeting, list visible topic links
+## 2. selectTopic(state, npcId, topicId) — apply variable_changes, return lines
 ##
+## Topic links embed the npcId so no session state is required.
 ## Condition / change format: see engine/variables.nim
 
 import std/[json, re, strformat, strutils, tables]
@@ -23,10 +23,10 @@ import api_types
 
 let topicLinkRe = re(r"\[\[([^\]:\[]+):([^\]]+)\]\]")
 
-proc renderLinks(text: string): string =
-  ## Rewrite [[display:topic_id]] → [[display:say topic_id]] so the UI sends
-  ## the right command on click.  Plain [[cmd]] tokens (no colon) are unchanged.
-  result = text.replacef(topicLinkRe, "[[$1:say $2]]")
+proc renderLinks(text, npcId: string): string =
+  ## Rewrite [[display:topic_id]] → [[display:say npcId topic_id]] so the UI
+  ## fires the right command on click.  Plain [[cmd]] tokens are unchanged.
+  result = text.replacef(topicLinkRe, "[[$1:say " & npcId & " $2]]")
 
 
 # ── Topic list ────────────────────────────────────────────────────────────────
@@ -35,11 +35,11 @@ proc condSeq(node: JsonNode): seq[JsonNode] =
   if node == nil or node.kind != JArray: return @[]
   for x in node: result.add x
 
-proc topicLines(npcRaw: JsonNode; variables: Table[string, JsonNode]): seq[string] =
-  ## Visible topics as clickable links + Farewell.
+proc topicLines(npcRaw: JsonNode; variables: Table[string, JsonNode];
+                npcId: string): seq[string] =
+  ## Visible topics as clickable links. No farewell — just close the window.
   let topics = npcRaw{"topics"}
-  if topics == nil or topics.kind != JArray:
-    return @["", "  [[Farewell:farewell]]"]
+  if topics == nil or topics.kind != JArray: return @[]
 
   var visible: seq[(string, string)]   # (displayName, topicId)
   for t in topics:
@@ -47,19 +47,17 @@ proc topicLines(npcRaw: JsonNode; variables: Table[string, JsonNode]): seq[strin
     if not vars.evalConditions(condSeq(t{"variable_conditions"}), variables): continue
     visible.add (t{"display_name"}.getStr, t{"topic"}.getStr)
 
-  if visible.len == 0:
-    return @["", "  [[Farewell:farewell]]"]
+  if visible.len == 0: return @[]
 
   result = @[""]
   for (disp, tid) in visible:
-    result.add &"  [[{disp}:say {tid}]]"
-  result.add "  [[Farewell:farewell]]"
+    result.add &"  [[{disp}:say {npcId} {tid}]]"
 
 
 # ── Public API ────────────────────────────────────────────────────────────────
 
 proc openDialogue*(state: var GameState; npcId: string): seq[string] =
-  ## Begin dialogue. Sets _talking_to. Returns lines to print.
+  ## Print greeting and visible topic links. No session state set.
   if npcId notin content.npcs:
     return @[&"(NPC '{npcId}' not found in content/npcs/.)"]
   let npc = content.npcs[npcId]
@@ -73,18 +71,15 @@ proc openDialogue*(state: var GameState; npcId: string): seq[string] =
         opening = entry{"text"}.getStr(opening)
         break
 
-  state.variables["_talking_to"] = %npcId
-
   result = @[npc.displayName, repeat('-', 40)]
-  result.add renderLinks(opening)
-  result &= topicLines(npc.raw, state.variables)
+  result.add renderLinks(opening, npcId)
+  result &= topicLines(npc.raw, state.variables, npcId)
 
 
-proc selectTopic*(state: var GameState; topicId: string): seq[string] =
-  ## Select a topic for the active NPC. Applies variable_changes, returns lines.
-  let npcId = state.variables.getOrDefault("_talking_to", newJNull()).getStr
-  if npcId == "" or npcId notin content.npcs:
-    return @["(No active NPC.)"]
+proc selectTopic*(state: var GameState; npcId, topicId: string): seq[string] =
+  ## Select a topic. Applies variable_changes, returns lines.
+  if npcId notin content.npcs:
+    return @[&"(NPC '{npcId}' not found.)"]
   let npc = content.npcs[npcId]
 
   # Find the topic
@@ -119,7 +114,7 @@ proc selectTopic*(state: var GameState; topicId: string): seq[string] =
       if line.len > 0:
         result &= apiRunCommand(state, line, npcId)
 
-  let text = renderLinks(topicNode{"dialogue_text"}.getStr)
+  let text = renderLinks(topicNode{"dialogue_text"}.getStr, npcId)
 
   # Shop trigger
   let shopId = topicNode{"shop"}.getStr
@@ -131,10 +126,4 @@ proc selectTopic*(state: var GameState; topicId: string): seq[string] =
 
   result = @[text]
   if topicNode{"show_topics"}.getBool(true):
-    result &= topicLines(npc.raw, state.variables)
-
-
-proc endDialogue*(state: var GameState) =
-  ## Clear active conversation state.
-  state.variables.del("_talking_to")
-  state.variables.del("_active_shop")
+    result &= topicLines(npc.raw, state.variables, npcId)

@@ -334,6 +334,14 @@ proc runCommand*(state: var GameState; cmd: string;
     elif parts.len >= 2:
       return @["  " & parts[1..^1].join(" ").strip(chars = {'"', '\''})]
 
+  of "set_var":
+    # set_var <key> <value>
+    if parts.len < 3: return
+    let key = parts[1]
+    let raw = parts[2]
+    try:    state.variables[key] = newJFloat(parseFloat(raw))
+    except: state.variables[key] = newJString(raw)
+
   of "pause":
     return @[COMBAT_PAUSE]
 

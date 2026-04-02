@@ -5,7 +5,7 @@
 ##
 ## Call startGameThread(contentDir) from the main thread before ui.main().
 
-import std/[json, os, strformat]
+import std/[json, os, strformat, random]
 import state
 import content
 import world
@@ -76,6 +76,8 @@ proc gameThread(contentDir: string) {.thread.} =
   # Content tables and command registry are GC'd globals, but only written
   # during this thread's own init before entering the recv loop — safe.
   {.cast(gcsafe).}:
+    randomize()
+
     # Load settings and content
     settings.loadSettings("settings.txt")
     loadContent(contentDir)

@@ -445,11 +445,12 @@ step in `dispatch` before the table lookup.
 ### Phase 7 — Dialogue & Economy ✓ DONE 2026-04-01
 *Goal: NPC conversations and shops work end-to-end.*
 
-- [x] `src/engine/dialogue.nim` — `openDialogue`, `selectTopic`, `endDialogue`, link token conversion, opening conditions
+- [x] `src/engine/dialogue.nim` — `openDialogue`, `selectTopic`, link token conversion, opening conditions
 - [x] `src/engine/economy.nim` — `openShop`, `shopLines`, `shopCategoryLines`, `buyTrade`, `sellItem`, mercantile scaling, economic event stub
-- [x] `src/commands/cmd_dialogue.nim` — `talk`, `say`, `farewell`, `shop`, `buy`, `sell` (all economy commands live here, matching Python layout)
+- [x] `src/commands/cmd_dialogue.nim` — `talk`, `say`, `shop`, `buy`, `sell`
 
-> **Notes:** `shop`/`buy`/`sell`/`say`/`farewell`/`bye` registered as `registerAny` hidden — active in any context so stale dialogue links still resolve.
+> **Notes:** `shop`/`buy`/`sell`/`say` registered as `registerAny` hidden — active in any context so stale dialogue links still resolve.
+> Farewell/dialogue-mode removed in Phase 10 — topic links now embed npcId; no `_talking_to` state needed.
 > Economic events not yet authored in content; `adjustedCost` falls back to base cost (tags not present in typed `ItemDef` — extend when content adds them).
 > `dialogue.nim` uses `std/re` (`replacef`) for link rewriting — NPC raw JSON accessed via `npc.raw{"topics"}`.
 > `economy.nim` reads shop trades directly from `content.shops[id].raw{"items"}` (no typed trade struct needed).
@@ -492,8 +493,7 @@ step in `dispatch` before the table lookup.
 > **Notes:** zippy `addDir` includes the directory name in ZIP paths — ZIP is built manually
 > using `walkDirRec` + `ArchiveEntry` so paths inside the archive are relative to `working/`
 > (no `"working/"` prefix), matching what `extractAll` expects.
-> `game_loop` now calls `saves.clearWorkingOnLaunch()` + `saves.newGame()` at startup instead
-> of the old hard-coded state init (so world_seed is random each launch, not from world_def).
+> `game_loop` calls `saves.clearWorkingOnLaunch()` + `initGameState()` at startup — game begins in `ctxMenu`; `newGame()` is only called when the player explicitly chooses `new`.
 
 All wire-up points are marked `# SAVES_WIRE <operation>` in source — `grep -r SAVES_WIRE src/` finds them all.
 
@@ -509,7 +509,7 @@ All wire-up points are marked `# SAVES_WIRE <operation>` in source — `grep -r 
 | `on_new_game` | Clear save and start fresh | `cmd_universal.nim` |
 | `on_continue` | Load most recent save on launch | `cmd_universal.nim` |
 
-### Phase 10 — Polish
+### Phase 10 — Polish ✓ DONE 2026-04-02
 *Goal: feature parity with Python version.*
 
 - [x] `skills`, `levelup_skill`, `levelup_stat`, `levelup_perk`, `perks` commands — `cmd_universal.nim`
@@ -519,12 +519,21 @@ All wire-up points are marked `# SAVES_WIRE <operation>` in source — `grep -r 
 - [x] NPC schedule reload at tick boundary — `clock.onScheduleBoundary` hook wired in `game_loop.nim`
 - [x] Main menu context (`ctxMenu`) — `new`, `continue`, `load` in `cmd_menu.nim` (ctxMenu-only); game starts in ctxMenu with splash; `new`/`continue`/`load` transition to ctxWorld with image
 - [x] Journal system — `cmd_journal.nim`; overlay replaces left panel; toolbar: `[<] Page N/M [>]  search:[____]  [X]`; live search results as clickable `[[Page N: ...]]` links (reuses Line/Span pipeline); full multi-line editing; PageDown on last page adds new page; Esc/[X] saves+closes; Tab toggles search/body focus
+- [x] Journal UI polish — iBeam cursor over search/page inputs; page number is a clickable text input (type number + Enter to jump; creates blank pages if target is beyond range); search result link hover highlight matches scrollback style; sash drag release works while journal is open
+- [x] Dialogue farewell/mode removed — `farewell`/`endDialogue`/`_talking_to` dropped; topic links embed npcId (`say <npcId> <topicId>`) so no session state is needed; `cmd_dialogue.nim` simplified
+- [x] `engine.get_var(key)` / `engine.set_var(key, value)` Lua API added to `scripting.nim`; `set_var <key> <value>` verb added to `api.nim` for use from content JSON
+- [x] `randomize()` called at game thread start — fixes deterministic default RNG seed affecting armor proc rolls
+- [x] `content/npcs/zombie.json` `death_script` updated from `.py` to `.lua`
+- [x] `content/scripts/test_api.lua` rewritten as API reference documentation
+
 > **Notes:** `skills.toTitleCase` exported (`*`) for use in `cmd_universal.nim`.
 > `new`/`continue`/`load` moved from `cmd_universal` (registerAny) to `cmd_menu` (ctxMenu-only). `save` stays registerAny.
 > Menu splash emitted directly from `game_loop` init; `look` in ctxMenu re-shows the splash.
 > Save versioning dropped — no saves are being carried over.
 > `levelup_perk` takes optional `<spend_pick>` and `<duration>` args matching Python API.
 > `spells` command marks favourites with `*` (SpaceMono lacks `★`).
+> `parseLine("[[label:cmd]]")` splits on first colon — journal result links bypass `parseLine` and construct `seq[Span]` directly to avoid colon ambiguity in labels.
+> `ctxDialogue` remains in the `GameContext` enum but is unused — dialogue no longer sets a special context.
 
 ---
 
@@ -647,11 +656,11 @@ Beyond Nim source code, some Python-specific content files will need updates:
 | What | Python format | Nim target |
 |---|---|---|
 | `content/scripts/*.py` | Pseudo-command syntax (not real Python) | ✓ Done — replaced with `.lua` equivalents |
-| NPC `script:` fields in JSON | `.py` file path references | Update extension to `.lua` in NPC JSON |
+| NPC `script:` fields in JSON | `.py` file path references | ✓ Done — `zombie.json` updated to `.lua` (Phase 10) |
 | Effect/perk event hooks | `on_kill: ["damage player 5"]` command strings | Add `lua_hooks` table (see §9.3) |
 | `content/ai_packages/*.json` | Python AI condition syntax | Same format — port condition evaluator to Nim |
 
-**Notes on content scripts**: `death_satchel.py` and `town-villager_dialogue_town.py` have been replaced with `.lua` equivalents (Phase 8). NPC JSON `death_script` fields that still reference `.py` paths need the extension updated to `.lua`.
+**Notes on content scripts**: `death_satchel.py` and `town-villager_dialogue_town.py` have been replaced with `.lua` equivalents (Phase 8). All NPC JSON `death_script` fields have been updated to `.lua` (Phase 10).
 
 **`mod_manager.py`**: A Tkinter-based authoring GUI that manages content packs and
 runs export drivers. It is a **dev tool only** — nothing to port. The Nim runtime
@@ -681,7 +690,6 @@ gameplay_vars) is pure JSON with no Python-specific syntax — load as-is.
 - `isinstance` dispatch → `case` on variant types
 
 **Drop for now:**
-- Journal system (nice to have, not core)
 - PIL image compositing (SDL2 can composite sprites natively)
 - Python `log.py` → use `std/logging` or just `echo` + file append
 - Economic events (implement later; infrastructure is simple)
@@ -739,4 +747,4 @@ From Phase 8, `api.runCommand` also handles `.lua` suffixes transparently — bo
 
 ---
 
-*Last updated: 2026-04-01 — Phase 8 complete*
+*Last updated: 2026-04-02 — Phase 10 complete*

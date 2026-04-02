@@ -1,6 +1,6 @@
 ## commands/cmd_dialogue.nim
 ## ─────────────────────────
-## Dialogue and economy commands: talk, say, farewell, shop, buy, sell.
+## Dialogue and economy commands: talk, say, shop, buy, sell.
 ## Call initCmdDialogue() from game_loop to register handlers.
 
 import std/[sequtils, strformat, strutils]
@@ -25,15 +25,9 @@ proc cmdTalk(state: var GameState; args: seq[string]): CmdResult =
 
 
 proc cmdSay(state: var GameState; args: seq[string]): CmdResult =
-  if args.len == 0:
-    return err("Say what? Usage: say <topic>")
-  let topicId = args.join("_").toLowerAscii
-  ok(dlg.selectTopic(state, topicId))
-
-
-proc cmdFarewell(state: var GameState; args: seq[string]): CmdResult =
-  dlg.endDialogue(state)
-  ok("You say farewell.")
+  if args.len < 2:
+    return err("say <npc_id> <topic_id>")
+  ok(dlg.selectTopic(state, args[0].toLowerAscii, args[1].toLowerAscii))
 
 
 proc cmdShop(state: var GameState; args: seq[string]): CmdResult =
@@ -55,11 +49,9 @@ proc cmdSell(state: var GameState; args: seq[string]): CmdResult =
 
 
 proc initCmdDialogue*() =
-  register("talk",     ctxTown,     cmdTalk)
-  register("talk",     ctxDungeon,  cmdTalk)
-  registerAny("say",      cmdSay,      hidden = true)
-  registerAny("farewell", cmdFarewell, hidden = true)
-  registerAny("bye",      cmdFarewell, hidden = true)
-  registerAny("shop",     cmdShop,     hidden = true)
-  registerAny("buy",      cmdBuy,      hidden = true)
-  registerAny("sell",     cmdSell,     hidden = true)
+  register("talk",  ctxTown,    cmdTalk)
+  register("talk",  ctxDungeon, cmdTalk)
+  registerAny("say",  cmdSay,  hidden = true)
+  registerAny("shop", cmdShop, hidden = true)
+  registerAny("buy",  cmdBuy,  hidden = true)
+  registerAny("sell", cmdSell, hidden = true)

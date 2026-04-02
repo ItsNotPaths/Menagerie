@@ -2,6 +2,7 @@
 ## Embeds Lua 5.4 via the amalgamation in vendor/lua/src/ — no external dependency.
 
 import strutils, os
+import std/[json, tables]
 import state, api_types
 
 # Compile the full Lua runtime into the binary.
@@ -71,6 +72,9 @@ proc lua_newtable*(L: LuaStatePtr)
 proc lua_setfield*(L: LuaStatePtr; idx: cint; k: cstring)
   {.importc: "lua_setfield", header: "../vendor/lua/src/lua.h".}
 
+proc lua_pushnil*(L: LuaStatePtr)
+  {.importc: "lua_pushnil", header: "../vendor/lua/src/lua.h".}
+
 # ─── Nim-friendly wrappers ───────────────────────────────────────────────────
 template luaPCall*(L: LuaStatePtr; nargs, nresults, msgh: cint): cint =
   lua_pcallk(L, nargs, nresults, msgh, 0, nil)
@@ -130,6 +134,30 @@ proc luaEngineCmdImpl(L: LuaStatePtr): cint {.cdecl.} =
     gScriptLines &= apiRunCommand(gScriptState[], cmd, gScriptSelfId)
   return 0
 
+proc luaGetVarImpl(L: LuaStatePtr): cint {.cdecl.} =
+  ## engine.get_var(key) — read a GameState variable. Returns string or nil.
+  let key = luaToString(L, 1)
+  if gScriptState != nil and key.len > 0 and key in gScriptState.variables:
+    let val = gScriptState.variables[key]
+    let s = if val.kind == JString:          val.getStr
+            elif val.kind in {JFloat, JInt}: $(val.getFloat(0))
+            elif val.kind == JBool:          (if val.getBool: "true" else: "false")
+            else:                            ""
+    discard lua_pushstring(L, s.cstring)
+    return 1
+  lua_pushnil(L)
+  return 1
+
+proc luaSetVarImpl(L: LuaStatePtr): cint {.cdecl.} =
+  ## engine.set_var(key, value) — write a GameState variable.
+  ## Numeric strings are stored as JFloat; everything else as JString.
+  let key = luaToString(L, 1)
+  let raw = luaToString(L, 2)
+  if gScriptState != nil and key.len > 0:
+    try:    gScriptState.variables[key] = newJFloat(parseFloat(raw))
+    except: gScriptState.variables[key] = newJString(raw)
+  return 0
+
 proc initScriptEngine*(eng: var ScriptEngine; onPrint: PrintCallback) =
   eng.L       = luaL_newstate()
   eng.onPrint = onPrint
@@ -146,6 +174,10 @@ proc initScriptEngine*(eng: var ScriptEngine; onPrint: PrintCallback) =
   lua_setfield(eng.L, -2, "print")
   lua_pushcclosure(eng.L, luaEngineCmdImpl, 0)
   lua_setfield(eng.L, -2, "cmd")
+  lua_pushcclosure(eng.L, luaGetVarImpl, 0)
+  lua_setfield(eng.L, -2, "get_var")
+  lua_pushcclosure(eng.L, luaSetVarImpl, 0)
+  lua_setfield(eng.L, -2, "set_var")
   lua_setglobal(eng.L, "engine")
 
 proc closeScriptEngine*(eng: var ScriptEngine) =

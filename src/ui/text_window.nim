@@ -102,7 +102,11 @@ type
     jBtnNext:  tuple[x,y,w,h: int]
     jBtnClose: tuple[x,y,w,h: int]
     jSrchBox:  tuple[x,y,w,h: int]
+    jPageBox:  tuple[x,y,w,h: int]
     jBodyY:    int
+    journalPageFocus: bool
+    journalPageInput: string
+    journalPageCur:   int
 
     # hover link
     hoverLink: string
@@ -257,11 +261,14 @@ proc journalGotoPage(app: var App; idx: int) =
   app.journalSrchCur  = 0
 
 proc openJournalOverlay(app: var App; pages: seq[string]; idx: int) =
-  app.journalPages    = if pages.len > 0: pages else: @[""]
-  app.journalOpen     = true
+  app.journalPages     = if pages.len > 0: pages else: @[""]
+  app.journalOpen      = true
   app.journalSrchFocus = false
-  app.journalSearch   = ""
-  app.journalSrchCur  = 0
+  app.journalSearch    = ""
+  app.journalSrchCur   = 0
+  app.journalPageFocus = false
+  app.journalPageInput = ""
+  app.journalPageCur   = 0
   app.journalGotoPage(clamp(idx, 0, app.journalPages.high))
 
 proc closeJournalOverlay(app: var App) =
@@ -270,21 +277,30 @@ proc closeJournalOverlay(app: var App) =
   app.journalOpen = false
 
 proc journalResultLines(app: App): seq[Line] =
-  ## Build search result lines as parsed Line objects so links work.
+  ## Build search result lines. Spans are constructed directly so the label
+  ## can contain colons without confusing parseLine's [[label:cmd]] split.
   let q = app.journalSearch.toLowerAscii
-  result.add parseLine("Results for '" & app.journalSearch & "':")
-  result.add parseLine("")
+  result.add @[Span(text: "Results for '" & app.journalSearch & "':")]
+  result.add @[Span(text: "")]
   var found = false
   for i, page in app.journalPages:
-    if q in page.toLowerAscii:
-      let fl = page.splitLines()
-      let label = if fl.len > 0 and fl[0].strip.len > 0: fl[0].strip
-                  else: "(empty page)"
-      result.add parseLine("  [[Page " & $(i+1) & ": " & label &
-                            ":journal_goto " & $i & "]]")
+    let pageLow = page.toLowerAscii
+    let matchIdx = pageLow.find(q)
+    if matchIdx >= 0:
+      # Context window: up to 35 chars either side of the match
+      let ctx    = 35
+      let start  = max(0, matchIdx - ctx)
+      let stop   = min(page.high, matchIdx + q.len + ctx - 1)
+      let pre    = if start > 0: "..." else: ""
+      let suf    = if stop < page.high: "..." else: ""
+      let excerpt = pre & page[start .. stop].replace("\n", " ") & suf
+      let label  = "Page " & $(i+1) & ": " & excerpt
+      result.add @[Span(text: "  "),
+                   Span(text: label, isLink: true,
+                        cmd: "journal_goto " & $i)]
       found = true
   if not found:
-    result.add parseLine("  No results.")
+    result.add @[Span(text: "  No results.")]
 
 proc renderJournalBtn(app: var App; r: tuple[x,y,w,h: int];
                       label: string; hot: bool) =
@@ -317,14 +333,30 @@ proc renderJournal(app: var App) =
   app.jBtnPrev = prevR
   app.renderJournalBtn(prevR, "<", inRect(mx.int, my.int, prevR))
 
-  # ── Page N / M ─────────────────────────────────────────────────────────────
+  # ── Page N / M (clickable input) ──────────────────────────────────────────
   let pageText = "Page " & $(app.journalIdx + 1) & " / " & $app.journalPages.len
   let ptX = prevR.x + prevR.w + 6
   let ptY = btnY + (btnH - app.fontH) div 2
-  discard app.ren.renderText(app.font, pageText, ptX, ptY, COL_FG)
+  let ptW = textWidth(app.font, pageText)
+  let pageR = (x: ptX, y: btnY, w: ptW, h: btnH)
+  app.jPageBox = pageR
+  if app.journalPageFocus:
+    app.ren.setColor(COL_BG)
+    app.ren.fillRect(pageR.x, pageR.y, pageR.w, pageR.h)
+    app.ren.setColor(COL_FG_LINK)
+    var pageBorder = rect(pageR.x.cint, pageR.y.cint, pageR.w.cint, pageR.h.cint)
+    discard app.ren.drawRect(pageBorder.addr)
+    let pInnerX = pageR.x + 3
+    discard app.ren.renderText(app.font, app.journalPageInput, pInnerX, ptY, COL_FG)
+    if app.showCursor:
+      let curX = pInnerX +
+                 textWidth(app.font, app.journalPageInput[0 ..< app.journalPageCur])
+      app.ren.setColor(COL_CURSOR)
+      app.ren.fillRect(curX, ptY, 2, app.fontH)
+  else:
+    discard app.ren.renderText(app.font, pageText, ptX, ptY, COL_FG)
 
   # ── [>] next button ────────────────────────────────────────────────────────
-  let ptW   = textWidth(app.font, pageText)
   let nextR = (x: ptX + ptW + 6, y: btnY, w: btnW, h: btnH)
   app.jBtnNext = nextR
   app.renderJournalBtn(nextR, ">", inRect(mx.int, my.int, nextR))
@@ -376,8 +408,21 @@ proc renderJournal(app: var App) =
       let lineY = bodyY + TEXT_PAD + li * app.lineH
       var cx = TEXT_PAD
       for span in line:
-        let col = if span.isLink: COL_FG_LINK else: COL_FG
-        cx += app.ren.renderText(app.font, span.text, cx, lineY, col)
+        let sw = textWidth(app.font, span.text)
+        let isHovered = span.isLink and
+                        mx.int >= cx and mx.int < cx + sw and
+                        my.int >= lineY and my.int < lineY + app.lineH
+        discard app.ren.renderText(app.font, span.text, cx, lineY,
+                                   if span.isLink: COL_FG_LINK else: COL_FG)
+        if span.isLink:
+          app.ren.setColor(COL_FG_LINK)
+          app.ren.fillRect(cx, lineY + app.fontH - 4, sw, 1)
+          if isHovered:
+            app.ren.setColor((r: 143u8, g: 188u8, b: 187u8, a: 40u8))
+            discard app.ren.setDrawBlendMode(BlendMode_Blend)
+            app.ren.fillRect(cx, lineY + 4, sw, app.fontH - 4)
+            discard app.ren.setDrawBlendMode(BlendMode_None)
+        cx += sw
   else:
     # Edit mode — plain lines with blinking cursor
     for li, line in app.journalLines:
@@ -812,6 +857,28 @@ proc main*() =
         if app.draggingSash:
           app.sashX = clamp(mx - app.sashDragOff, 200, app.winW - 250)
           app.recomputeBgRect()
+        elif app.journalOpen:
+          let overSrch = inRect(mx, my, app.jSrchBox)
+          let overPage = inRect(mx, my, app.jPageBox)
+          let overBtn  = inRect(mx, my, app.jBtnPrev) or
+                         inRect(mx, my, app.jBtnNext) or
+                         inRect(mx, my, app.jBtnClose)
+          var overResultLink = false
+          if app.journalSearch.len > 0 and my >= app.jBodyY:
+            let li = (my - app.jBodyY - TEXT_PAD) div app.lineH
+            let rlines = journalResultLines(app)
+            if li >= 0 and li < rlines.len:
+              var cx = TEXT_PAD
+              for span in rlines[li]:
+                let sw = textWidth(app.font, span.text)
+                if span.isLink and mx >= cx and mx < cx + sw:
+                  overResultLink = true
+                  break
+                cx += sw
+          setCursor:
+            if overSrch or overPage: app.curIBeam
+            elif overBtn or overResultLink: app.curHand
+            else: app.curArrow
         else:
           app.hoverLink = app.hitTestLink(mx, my)
           setCursor:
@@ -831,7 +898,7 @@ proc main*() =
           if mx >= app.sashX and mx < app.sashX + SASH_W:
             app.draggingSash = true
             app.sashDragOff  = mx - app.sashX
-          else:
+          elif not app.journalOpen:
             app.selecting    = true
             app.hasSelection = false
             app.selStart     = app.anchorFromMouse(mx, my)
@@ -840,7 +907,9 @@ proc main*() =
       of MouseButtonUp:
         let mx = ev.button.x.int
         let my = ev.button.y.int
-        if app.journalOpen:
+        if ev.button.button == BUTTON_LEFT and app.draggingSash:
+          app.draggingSash = false
+        elif app.journalOpen:
           if ev.button.button == BUTTON_LEFT:
             if inRect(mx, my, app.jBtnClose):
               app.closeJournalOverlay()
@@ -855,6 +924,12 @@ proc main*() =
                 app.journalGotoPage(app.journalPages.high)
             elif inRect(mx, my, app.jSrchBox):
               app.journalSrchFocus = true
+              app.journalPageFocus = false
+            elif inRect(mx, my, app.jPageBox):
+              app.journalPageFocus = true
+              app.journalSrchFocus = false
+              app.journalPageInput = $(app.journalIdx + 1)
+              app.journalPageCur   = app.journalPageInput.len
             elif my >= app.jBodyY and app.journalSearch.len > 0:
               # hit-test search result links
               let li = (my - app.jBodyY - TEXT_PAD) div app.lineH
@@ -872,6 +947,7 @@ proc main*() =
                   cx += sw
             else:
               app.journalSrchFocus = false
+              app.journalPageFocus = false
         elif ev.button.button == BUTTON_LEFT:
           if app.draggingSash:
             app.draggingSash = false
@@ -896,7 +972,12 @@ proc main*() =
       of TextInput:
         let s = $cast[cstring](ev.text.text[0].unsafeAddr)
         if app.journalOpen:
-          if app.journalSrchFocus:
+          if app.journalPageFocus:
+            # Only accept digits in the page number box
+            if s.len == 1 and s[0] in '0' .. '9':
+              app.journalPageInput.insert(s, app.journalPageCur)
+              app.journalPageCur += s.len
+          elif app.journalSrchFocus:
             app.journalSearch.insert(s, app.journalSrchCur)
             app.journalSrchCur += s.len
           else:
@@ -922,11 +1003,25 @@ proc main*() =
           app.cursorBlink = nowTick
           case ks.sym
           of K_ESCAPE:
-            app.closeJournalOverlay()
+            if app.journalPageFocus:
+              app.journalPageFocus = false
+            else:
+              app.closeJournalOverlay()
           of K_TAB:
             app.journalSrchFocus = not app.journalSrchFocus
+            app.journalPageFocus = false
           of K_RETURN, K_KP_ENTER:
-            if app.journalSrchFocus:
+            if app.journalPageFocus:
+              try:
+                let n = parseInt(app.journalPageInput) - 1  # 1-indexed
+                app.journalPageFocus = false
+                # Extend with blank pages if navigating past the end
+                while n > app.journalPages.high:
+                  app.journalPages.add ""
+                app.journalGotoPage(n)
+              except ValueError:
+                app.journalPageFocus = false
+            elif app.journalSrchFocus:
               app.journalSrchFocus = false
             elif app.journalLines.len < JOURNAL_MAX_LINES:
               let l      = app.journalLines[app.journalCurL]
@@ -937,7 +1032,11 @@ proc main*() =
               inc app.journalCurL
               app.journalCurC = 0
           of K_BACKSPACE:
-            if app.journalSrchFocus:
+            if app.journalPageFocus:
+              if app.journalPageCur > 0:
+                app.journalPageInput.delete(app.journalPageCur - 1 .. app.journalPageCur - 1)
+                dec app.journalPageCur
+            elif app.journalSrchFocus:
               if app.journalSrchCur > 0:
                 var i = app.journalSrchCur - 1
                 while i > 0 and
@@ -960,7 +1059,10 @@ proc main*() =
                 app.journalLines.delete(app.journalCurL)
                 dec app.journalCurL
           of K_DELETE:
-            if not app.journalSrchFocus:
+            if app.journalPageFocus:
+              if app.journalPageCur < app.journalPageInput.len:
+                app.journalPageInput.delete(app.journalPageCur .. app.journalPageCur)
+            elif not app.journalSrchFocus:
               let l = app.journalLines[app.journalCurL]
               if app.journalCurC < l.len:
                 var i = app.journalCurC + 1
@@ -973,7 +1075,9 @@ proc main*() =
                   app.journalLines[app.journalCurL + 1]
                 app.journalLines.delete(app.journalCurL + 1)
           of K_LEFT:
-            if app.journalSrchFocus:
+            if app.journalPageFocus:
+              if app.journalPageCur > 0: dec app.journalPageCur
+            elif app.journalSrchFocus:
               if app.journalSrchCur > 0: dec app.journalSrchCur
             else:
               if app.journalCurC > 0:
@@ -985,7 +1089,9 @@ proc main*() =
                 dec app.journalCurL
                 app.journalCurC = app.journalLines[app.journalCurL].len
           of K_RIGHT:
-            if app.journalSrchFocus:
+            if app.journalPageFocus:
+              if app.journalPageCur < app.journalPageInput.len: inc app.journalPageCur
+            elif app.journalSrchFocus:
               if app.journalSrchCur < app.journalSearch.len:
                 inc app.journalSrchCur
             else:
@@ -1010,10 +1116,13 @@ proc main*() =
               app.journalCurC =
                 min(app.journalCurC, app.journalLines[app.journalCurL].len)
           of K_HOME:
-            if app.journalSrchFocus: app.journalSrchCur = 0
+            if app.journalPageFocus: app.journalPageCur = 0
+            elif app.journalSrchFocus: app.journalSrchCur = 0
             else: app.journalCurC = 0
           of K_END:
-            if app.journalSrchFocus:
+            if app.journalPageFocus:
+              app.journalPageCur = app.journalPageInput.len
+            elif app.journalSrchFocus:
               app.journalSrchCur = app.journalSearch.len
             else:
               app.journalCurC = app.journalLines[app.journalCurL].len
