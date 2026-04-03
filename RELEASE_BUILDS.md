@@ -140,10 +140,17 @@ passL = "-ldl -lpthread -lrt -lm"
 **4. Compile**
 
 `docker-build/build.sh` runs the container, compiles, strips, fixes ownership,
-verifies no SDL2 dynamic dep, and copies the result to `../menagerie-proto-release/`.
+verifies no SDL2 dynamic dep, and copies the result to `../menagerie-release/`.
+
+Flags:
+- `--game` — build the main game binary (`menagerie`)
+- `--manager` — build the mod manager binary (`mod_manager`)
+- `--tools` — reserved for the future world/room editor tools applet
 
 ```bash
-./docker-build/build.sh
+./docker-build/build.sh --game
+./docker-build/build.sh --manager
+./docker-build/build.sh --game --manager   # both at once
 ```
 
 **5. Verify the result**
@@ -200,36 +207,47 @@ passL = "-mwindows"
 docker-build/
 ├── Dockerfile          ← Ubuntu 20.04; COPYs vendor/ and builds SDL2/ttf/image/Lua
 ├── nim.cfg             ← release link flags (dynlibOverride + -Wl,-Bstatic)
-└── build.sh            ← builds image, compiles, strips, verifies, copies to release dir
+└── build.sh            ← --game / --manager / --tools flags; compiles, strips, copies to release dir
 
 vendor/                 ← downloaded by download-deps.sh; not committed
 ├── sdl2 tarball/
 ├── sdl2.ttf tarball/
 ├── sdl2.image tarball/
-├── lua/src/            ← Lua 5.4 amalgamation (compiled into binary via scripting.nim)
+├── lua/src/            ← Lua 5.4 amalgamation (compiled into both binaries via onelua.c)
 └── fonts/
     └── SpaceMono-Regular.ttf   ← embedded at compile time via staticRead
 
 data/
-└── base-game/
-    ├── assets/
-    ├── plugins/
-    └── scripts/
+└── base-game/          ← one folder per plugin, keyed by tool_id
+    └── <PluginFolder>/
+        └── <plugin>.json
 
 src/
-├── menagerie.nim           ← entry point
-├── ui/
-│   ├── text_window.nim     ← SDL2 window, rendering, input
-│   └── ipc.nim             ← queue bridge (placeholder)
-└── engine/
-    └── scripting.nim       ← embedded Lua 5.4 bridge
+├── menagerie.nim       ← entry point
+├── engine/             ← game logic (state, combat, world, saves, dialogue, ...)
+├── commands/           ← player-input handlers split by context (cmd_combat, cmd_town, ...)
+└── ui/
+    ├── text_window.nim ← SDL2 window, rendering, input, panel system
+    └── ipc.nim         ← typed Channel[UiMsg] / Channel[GameMsg]
 
-nim.cfg                     ← development build only (distrobox, dynamic SDL2)
-menagerie.nimble
-download-deps.sh            ← fetches vendor/ contents
+world-tools/
+├── drivers/            ← Lua 5.4 export drivers (copied to release, not compiled in)
+│   ├── world/world.lua
+│   ├── rooms/rooms.lua
+│   ├── gameplay_vars/gameplay_vars.lua
+│   ├── menagerie/menagerie.lua
+│   └── assets/assets.lua
+└── mod_manager/        ← mod manager source (compiled to separate binary)
+    ├── mod_manager.nim
+    ├── plugin_db.nim
+    └── lua_runner.nim
+
+nim.cfg                 ← development build only (distrobox, dynamic SDL2)
+menagerie.nimble        ← bin = @["menagerie"]; srcDir = "src"
+download-deps.sh        ← fetches vendor/ contents
 ```
 
-### Path resolution note for `scripting.nim`
+### Path resolution note for Lua bindings
 
 Nim uses different resolution rules for different pragma types:
 
@@ -237,10 +255,11 @@ Nim uses different resolution rules for different pragma types:
 |---|---|---|
 | `{.compile: "...".}` | Nim, relative to source file | `../../vendor/lua/src/onelua.c` |
 | `{.passC: "-I...".}` | gcc verbatim — must be absolute | computed via `currentSourcePath` |
-| `header: "..."` | gcc, relative to `-I<srcDir>` flag | `../vendor/lua/src/lua.h` |
+| `header: "..."` | gcc, relative to `-I<srcDir>` flag | `lua.h` (resolved via `-I` flag) |
 
-The `header:` paths use one `..` because Nim adds `-I/src/src` (the `srcDir`) to
-every gcc invocation, and from there `../vendor/lua/src/X.h` resolves correctly.
+Both `src/engine/scripting.nim` and `world-tools/mod_manager/lua_runner.nim` are exactly
+two directory levels from the project root, so `../../vendor/lua/src/onelua.c` resolves
+correctly from both locations.
 
 ---
 
@@ -249,15 +268,21 @@ every gcc invocation, and from there `../vendor/lua/src/X.h` resolves correctly.
 **Linux** (`menagerie-linux-x64.tar.gz`):
 ```
 menagerie/
-├── menagerie       ← binary, ~20-30 MB stripped (SDL2 compiled in)
+├── menagerie           ← game binary, ~20-30 MB stripped (SDL2 compiled in)
+├── mod_manager         ← mod manager binary, same static link profile
+├── world-tools/
+│   └── drivers/        ← Lua 5.4 export driver scripts
 └── data/
 ```
-No install requirements. Just run `./menagerie`.
+No install requirements. Run `./menagerie` to play, `./mod_manager` to export content.
 
 **Windows** (`menagerie-windows-x64.zip`):
 ```
 menagerie/
-├── menagerie.exe   ← fully self-contained, no DLLs needed
+├── menagerie.exe       ← fully self-contained, no DLLs needed
+├── mod_manager.exe
+├── world-tools/
+│   └── drivers/
 └── data/
 ```
 No install requirements.

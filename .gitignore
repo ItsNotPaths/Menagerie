@@ -6,8 +6,8 @@ content/
 world-tools-py/
 
 # images and whatnot. no need for git to bloat itself with
-data/base-game/menagerie-core/assets
-data/base-game/Inkwell-core/assets
+data/
+
 
 # Plans files
 plans/

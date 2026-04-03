@@ -1,11 +1,10 @@
 # Menagerie — Content & Tools Guide
 
-Text-based RPG. Python / Tkinter.
+Text-based RPG. Nim / SDL2 — statically linked binary, no install requirements.
 
-**Run:** `python menagerie.py`
-**Requires:** Python 3.11+, stdlib + Tkinter only.
+**Run:** `./menagerie`
 
-Plans and design docs are in `/plans/`. `plans/STATUS.md` is the live project state.
+Plans and design docs are in `plans/`. `plans/STATUS.md` is the live project state.
 
 ---
 
@@ -36,8 +35,8 @@ Plans and design docs are in `/plans/`. `plans/STATUS.md` is the live project st
   - [Target Selectors](#target-selectors)
   - [Commands](#commands)
 - [Scripts](#scripts)
-  - [Flat Command Syntax](#flat-command-syntax-preprocessed-to-python)
-  - [Python Logic](#python-logic)
+  - [Flat Command Syntax](#flat-command-syntax)
+  - [Lua Logic](#lua-logic)
   - [Available Functions](#available-functions)
   - [Restrictions](#restrictions-sandbox)
 
@@ -45,15 +44,15 @@ Plans and design docs are in `/plans/`. `plans/STATUS.md` is the live project st
 
 ## How Content Works
 
-The engine is a pure interpreter. All creative content lives in `/content/` as compiled JSON. The engine reads these files at runtime and never writes back to them. To change content, you author in the tools and export — you do not edit `/content/` directly.
+The engine is a pure interpreter. All creative content lives in `content/` as compiled JSON. The engine reads these files at runtime and never writes back to them. To change content, you author in the tools and export — you do not edit `content/` directly.
 
 ```
-world-tools/         editors for spells, world map, rooms
-inkwell/             NPC, dialogue, items, effects, armor, quests, AI packages
-mod_manager.py       combines all tools, manages plugin load order, one-click export
+world-tools/drivers/    Lua 5.4 export drivers (world, rooms, gameplay_vars, menagerie, assets)
+inkwell/                NPC, dialogue, items, effects, armor, quests, AI packages (external tool)
+mod_manager             SDL2 binary; manages plugin load order per tool, one-click Export All
 ```
 
-Running **Export All** in `mod_manager.py` runs all drivers in sequence and writes everything to `/content/`.
+Plugin source files live in `data/<modpack>/<PluginFolder>/<plugin>.json`. Running **Export All** in the mod manager calls each Lua driver in load order and writes everything to `content/`.
 
 ---
 
@@ -70,7 +69,7 @@ Running **Export All** in `mod_manager.py` runs all drivers in sequence and writ
 | `content/shops/` | Shop definitions |
 | `content/economic_events/` | Economic event definitions |
 | `content/quests/` | Quest variable definitions |
-| `content/scripts/` | `.py` script files referenced by content |
+| `content/scripts/` | `.lua` script files referenced by content |
 | `content/rooms/` | Room definitions |
 | `content/tiles/` | Tile composition files for named locations |
 | `content/world/` | `world_def.json` — road network and named tile placement |
@@ -105,7 +104,7 @@ Named NPCs (blacksmith, farmer) and spawned enemies (zombie, draugr) live in the
 | `loot_table` | `[{"item": id, "amount": N, "chance": 0-100}, ...]` — rolled on death |
 | `inventory` | Items the NPC carries (weapons used in combat, items for trade) |
 | `dialogue` | Inline dialogue definition or reference |
-| `death_script` | Filename of `.py` script in `content/scripts/` — runs on death |
+| `death_script` | Filename of `.lua` script in `content/scripts/` — runs on death |
 
 ---
 
@@ -159,7 +158,7 @@ Morrowind-style topic system. Built in Inkwell. Topics are menu items the player
 | `duration` | Spell-global effect duration in ticks (to be refactored to per-effect) |
 | `effects` | `[{"effect": "<id>", "ticks": N}, ...]` — applied to each target hit |
 | `on_hit_commands` | Command strings run on each target hit |
-| `on_hit_script` | Filename of `.py` script in `content/scripts/` run on each hit |
+| `on_hit_script` | Filename of `.lua` script in `content/scripts/` run on each hit |
 | `upgrades` | Future — upgrade definitions |
 | `relations` | `{"other_spell_id": weight}` — for archetype-weighted spell discovery |
 
@@ -188,7 +187,7 @@ Note: individual spell cooldowns are designed but not yet implemented.
 | `interactions` | List of interaction objects (see below) |
 | `description` | Flavor text |
 | `modifiers` | *(perk only)* Dict of float modifier values — see Perks section |
-| `on_<event>` | *(perk only)* Event handler — list of commands or `"script.py"` — see Perk Events |
+| `on_<event>` | *(perk only)* Event handler — list of commands or `"script.lua"` — see Perk Events |
 
 **Interactions** — fire when this effect is applied to a target that already has another effect:
 
@@ -238,7 +237,7 @@ These can be called from any script, dialogue `inline_script`, or item `on_use_c
 ```
 
 - `modifiers` — float delta values applied multiplicatively. `0.20` means ×1.20 on top of the base. Multiple perks with the same key stack: two at `+0.15` → `1.15 × 1.15 = 1.3225`. Negative values reduce: `-0.10` → ×0.90.
-- `on_<event>` — runs when that engine event fires while this perk is active. Value is either a list of command strings (same surface as `tick_commands`) or a single `"filename.py"` string pointing to a script in `content/scripts/`.
+- `on_<event>` — runs when that engine event fires while this perk is active. Value is either a list of command strings (same surface as `tick_commands`) or a single `"filename.lua"` string pointing to a script in `content/scripts/`.
 
 ### Modifier keys
 
@@ -273,7 +272,7 @@ Engine call sites fire named events at key moments. When an event fires, the eng
 **Handler formats:**
 ```json
 "on_kill": ["set_stat player health +5", "print You feel renewed."]
-"on_kill": "on_kill_handler.py"
+"on_kill": "on_kill_handler.lua"
 ```
 
 #### Event reference
@@ -414,24 +413,27 @@ Context written (all reset to 0):
 
 ### Reading event variables in scripts
 
-All `_`-prefixed event variables are readable directly by name in `.py` scripts, the same as any other game variable:
+All `_`-prefixed event variables are readable directly via the `get_var` helper in `.lua` scripts, the same as any other game variable:
 
-```python
-if _kills_this_combat >= 3:
-    add fervor 1
-    msg A battle frenzy takes hold.
+```lua
+if get_var("_kills_this_combat") >= 3 then
+    add("fervor", 1)
+    msg("A battle frenzy takes hold.")
+end
 ```
 
-```python
-if _last_hit_damage_actual > 20:
-    msg A powerful blow!
-    add_effect player stunned 1
+```lua
+if get_var("_last_hit_damage_actual") > 20 then
+    msg("A powerful blow!")
+    add_effect("player", "stunned", 1)
+end
 ```
 
-```python
-if _last_kill_faction == "undead":
-    set_stat player health +10
-    msg Holy light flows through you.
+```lua
+if get_var("_last_kill_faction") == "undead" then
+    set_stat("player", "health", "+10")
+    msg("Holy light flows through you.")
+end
 ```
 
 ---
@@ -614,7 +616,7 @@ Only one event can be active at a time. Triggering a new event while one is acti
 
 Quests are not tracked by the engine — they are just variables in `state.variables`. A quest is a set of flags that get set as the player progresses through dialogue and scripts.
 
-Variable naming convention: `category-name` (hyphens become underscores in Python scripts).
+Variable naming convention: `category-name` (accessible via `get_var("category-name")` in Lua scripts).
 
 Example: `farmer-disposition` → readable as `farmer_disposition` in scripts, `farmer-disposition` in variable_conditions JSON.
 
@@ -624,7 +626,7 @@ Quest definitions in `content/quests/<id>.json` are documentation only — they 
 
 ## Command API
 
-All effect `tick_commands`, spell `on_hit_commands`, armor proc `commands`, and scripts share the same command surface via `engine/api.py`.
+All effect `tick_commands`, spell `on_hit_commands`, armor proc `commands`, and scripts share the same command surface via `engine/api.nim`.
 
 ### Target Selectors
 
@@ -649,10 +651,10 @@ cast            <mode> <spell_id> <row> [dist]
 economic_event  <event_id> [force]
 ```
 
-**Script files** — any command entry ending in `.py` is treated as a script filename and run through the script interpreter. Works in every command field (`tick_commands`, `on_apply_commands`, proc commands, event hook commands, etc.):
+**Script files** — any command entry ending in `.lua` is treated as a script filename and run through the Lua engine. Works in every command field (`tick_commands`, `on_apply_commands`, proc commands, event hook commands, etc.):
 ```
-satchel.py
-on_kill_handler.py
+satchel.lua
+on_kill_handler.lua
 ```
 
 **`damage`** — deal damage to health (default), stamina, or focus:
@@ -710,9 +712,11 @@ economic_event iron_shortage force
 
 ## Scripts
 
-Scripts are `.py` files in `content/scripts/`. Triggered via `death_script` in NPC JSON or `inline_script` in dialogue topics. Run through a sandboxed interpreter.
+Scripts are `.lua` files in `content/scripts/`. Triggered via `death_script` in NPC JSON or `inline_script` in dialogue topics. Run through the embedded Lua 5.4 engine.
 
-### Flat Command Syntax (preprocessed to Python)
+### Flat Command Syntax
+
+Command fields (`tick_commands`, `on_apply_commands`, `inline_script`, etc.) accept a list of command strings. Each string is one command verb + args:
 
 ```
 damage player 10
@@ -730,37 +734,35 @@ add farmer-disposition 5
 sub bounty 1
 ```
 
-### Python Logic
+### Lua Logic
 
-Full `if/elif/else`, `for`, comparisons, and math supported. Game variables are readable directly by name. Use `set()` to persist changes back.
+Script files are full Lua 5.4. Game functions are available as globals. Use `get_var` / `set_var` to read and write game variables.
 
-```python
-if farmer_disposition >= 10:
-    msg You already know this person well.
-else:
-    give player gold 5
-    add farmer-disposition 5
-    msg They hand you something.
+```lua
+if get_var("farmer_disposition") >= 10 then
+    msg("You already know this person well.")
+else
+    give("player", "gold", 5)
+    add_var("farmer-disposition", 5)
+    msg("They hand you something.")
+end
 ```
 
 ### Available Functions
 
-```python
+```lua
 damage(selector, amount)
-damage(selector, amount, stat)           # stat: "health" | "stamina" | "focus"
+damage(selector, amount, stat)           -- stat: "health" | "stamina" | "focus"
 add_effect(selector, effect_id, duration)
 remove_effect(selector, effect_id)
-set_stat(selector, stat, value)          # stat: "health" | "stamina" | "focus" | "hunger" | "fatigue"
+set_stat(selector, stat, value)          -- stat: "health" | "stamina" | "focus" | "hunger" | "fatigue"
 give(selector, item_id)
 give(selector, item_id, amount)
 move_npc(npc_id, tile)
 msg(text)
 take(item_id)
-set(var, value)
-add(var, amount)
-sub(var, amount)
+get_var(name)                            -- read a game variable
+set_var(name, value)                     -- write a game variable
+add_var(name, amount)                    -- add to a numeric variable
+sub_var(name, amount)                    -- subtract from a numeric variable
 ```
-
-### Restrictions (sandbox)
-
-Blocked: `import`, `from`, `class`, `def`, `lambda`, `while`, `raise`, `try`, `with`, `yield`, `await`, `del`, attribute access (`x.y`), `__dunder__` names, keyword arguments, any function not in the allowed list.
