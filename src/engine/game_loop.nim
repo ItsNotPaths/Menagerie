@@ -52,6 +52,8 @@ proc pushLines(lines: seq[string]) =
   for line in lines:
     if line == COMBAT_PAUSE:
       os.sleep(settings.combatPauseMs())
+    elif line == travelPause:
+      os.sleep(settings.travelPauseMs())
     else:
       toUi.send(UiMsg(kind: umPrint, line: line))
 

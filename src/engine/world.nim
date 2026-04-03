@@ -806,7 +806,7 @@ proc travelRoad*(state: var GameState; direction: string; steps: int): (seq[stri
   state.player.position = (curX, curY)
   var totalTicks = terrainTicks.getOrDefault(firstTile.tileType, 4)
 
-  lines.add &"-> {direction.capitalizeAscii}"
+  lines.add &"-> {deltaToDir.getOrDefault((dx, dy), direction.capitalizeAscii)}"
 
   if firstTile.tileType in stopTileTypes:
     let name = (if firstTile.name != "": firstTile.name else: firstTile.tileType).replace("-", " ")

@@ -107,8 +107,8 @@ if $BUILD_GAME; then
     cp    "$PROJECT_DIR/menagerie"   "$RELEASE_DIR/menagerie"
     rm    "$PROJECT_DIR/menagerie"
     cp    "$PROJECT_DIR/settings.txt" "$RELEASE_DIR/settings.txt"
-    cp -rf "$PROJECT_DIR/content"    "$RELEASE_DIR/content"
-    cp -rf "$PROJECT_DIR/data"       "$RELEASE_DIR/data"
+    cp -rfT "$PROJECT_DIR/content"    "$RELEASE_DIR/content"
+    cp -rfT "$PROJECT_DIR/data"       "$RELEASE_DIR/data"
 
     echo "==> [game] Done: $RELEASE_DIR/menagerie"
 fi
