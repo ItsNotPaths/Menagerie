@@ -9,7 +9,7 @@
 ##
 ## Handler values in effect/armor JSON:
 ##   JArray   — each element is a command string, run via apiRunCommand
-##   JString  — Lua script filename (TODO Phase 8); .py not supported
+##   JString  — single command string or Lua script filename (.lua); .py not supported
 
 import std/[json, options, strutils, tables]
 import state, content, api_types

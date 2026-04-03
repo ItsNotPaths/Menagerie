@@ -191,10 +191,17 @@ proc getEquippedWeaponSkill(player: PlayerState): string =
   "longblade"   ## default
 
 
-proc applyResistances(enemy: CombatEnemy; damage: float): float =
-  ## Stub — resistance fields to be authored later.
-  ## TODO: check enemy.data{"resistances"} keyed by damage type.
-  damage
+proc applyResistances(enemy: CombatEnemy; damage: float; damageType: string): float =
+  ## Scales `damage` by the enemy's resistance modifier for `damageType`.
+  ## Resistances are authored as an array: [{"effect": "bleed", "modifier": 2.0}, ...]
+  ## A modifier > 1 means vulnerable; < 1 means resistant. Missing entry = no change.
+  result = damage
+  let resNode = enemy.data{"resistances"}
+  if resNode == nil or resNode.kind != JArray: return
+  for entry in resNode:
+    if entry{"effect"}.getStr == damageType:
+      result = damage * entry{"modifier"}.getFloat(1.0)
+      return
 
 
 # ── Kill helpers ──────────────────────────────────────────────────────────────
@@ -360,7 +367,8 @@ proc beginRound(state: var GameState): seq[string] =
       let eid = cs3.enemies[i].id
       var effs = cs3.enemies[i].effects
       state.combat = some(cs3)
-      let effLines = cond.tickEffects(state, effs, "enemy." & eid)
+      let effLines = cond.tickEffects(state, effs, "enemy." & eid,
+                                     cs3.enemies[i].data{"resistances"})
       for ln in effLines:
         result.add ln
         result.add COMBAT_PAUSE
@@ -794,7 +802,7 @@ proc firePendingAction(state: var GameState): seq[string] =
       result.add &"  You strike {atRange.mapIt(it.label).join(\", \")}."
       var totalDealt = 0.0
       for e in atRange:
-        let dmg = applyResistances(e, rawDmg)
+        let dmg = applyResistances(e, rawDmg, "physical")
         result &= api.cmdDamage(state, "enemy." & e.id, e.id, dmg, "health")
         totalDealt += dmg
       state.variables["_last_hit_damage_dealt"]    = %totalDealt
@@ -842,9 +850,11 @@ proc firePendingAction(state: var GameState): seq[string] =
         result.add &"  {spellId} ({mode}) finds no targets."
       else:
         result.add &"  {spellId} ({mode}):"
+        var totalDealt = 0.0
         for e in targets:
-          result &= api.cmdDamage(state, "enemy." & e.id, e.id, damage, "health")
-        let totalDealt = damage * targets.len.float
+          let dmg = applyResistances(e, damage, spellId)
+          result &= api.cmdDamage(state, "enemy." & e.id, e.id, dmg, "health")
+          totalDealt += dmg
         state.variables["_last_hit_damage_dealt"]    = %totalDealt
         state.variables["_last_hit_target_id"]       = %(if targets.len > 0: targets[0].id else: "")
         state.variables["_last_hit_target_count"]    = %targets.len

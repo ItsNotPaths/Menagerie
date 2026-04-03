@@ -144,7 +144,31 @@ proc cmdSetStat(state: var GameState; sel, selfId, stat, valueStr: string): seq[
       let v = if relative: state.player.fatigue + amt else: amt
       state.player.fatigue = max(0.0, min(100.0, v))
     else: discard
-  # TODO Phase 6: enemy stat mutation
+  elif sel == "enemy.self":
+    if selfId != "" and selfId != "player":
+      discard cmdSetStat(state, "enemy." & selfId, selfId, s, valueStr)
+  elif sel == "enemy.all":
+    if state.combat.isSome:
+      var cs = state.combat.get
+      for i in 0 ..< cs.enemies.len:
+        case s
+        of "health":  cs.enemies[i].health  = max(0.0, min(cs.enemies[i].maxHealth,  if relative: cs.enemies[i].health  + amt else: amt))
+        of "stamina": cs.enemies[i].stamina = max(0.0, min(cs.enemies[i].staminaMax, if relative: cs.enemies[i].stamina + amt else: amt))
+        of "focus":   cs.enemies[i].focus   = max(0.0, min(cs.enemies[i].focusMax,   if relative: cs.enemies[i].focus   + amt else: amt))
+        else: discard
+      state.combat = some(cs)
+  elif sel.startsWith("enemy."):
+    let rawId = sel[6..^1]
+    let eid   = if rawId == "self": selfId else: rawId
+    let idx   = resolveEnemyIdx(state, eid)
+    if idx >= 0 and state.combat.isSome:
+      var cs = state.combat.get
+      case s
+      of "health":  cs.enemies[idx].health  = max(0.0, min(cs.enemies[idx].maxHealth,  if relative: cs.enemies[idx].health  + amt else: amt))
+      of "stamina": cs.enemies[idx].stamina = max(0.0, min(cs.enemies[idx].staminaMax, if relative: cs.enemies[idx].stamina + amt else: amt))
+      of "focus":   cs.enemies[idx].focus   = max(0.0, min(cs.enemies[idx].focusMax,   if relative: cs.enemies[idx].focus   + amt else: amt))
+      else: discard
+      state.combat = some(cs)
 
 
 # ── Verb: add_effect ──────────────────────────────────────────────────────────
