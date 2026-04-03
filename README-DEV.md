@@ -44,6 +44,8 @@ src/
     api.nim                  programmatic command surface for content (effects, armor, spells, scripts)
     api_types.nim            shared types for the api surface
     combat.nim               spatial grid combat — enemy phase, player actions, trifecta, aux spells
+    combat_ai.nim            included by combat.nim — AI condition DSL evaluator, action-table picker
+    combat_display.nim       included by combat.nim — status lines, weapon stats, option buttons
     world.nim                tile generation, room loading, NPC schedule resolution, dirty cache
     saves.nim                save/load — ZIP working directory, dirty flush, npc_states persistence
     clock.nim                tick system — passTicks(), hunger, sleep deprivation
@@ -76,6 +78,7 @@ src/
     cmd_world.nim            world travel commands
   ui/
     text_window.nim          SDL2 window — scrollback, input bar, HUD canvas, panel system
+    journal.nim              included by text_window.nim — journal overlay rendering and input
     ipc.nim                  typed channels: toUi / toGame
 
 world-tools/
@@ -116,8 +119,10 @@ Two threads. Game logic thread reads from `toGame`, writes to `toUi`. SDL2 UI th
 | `game_loop.nim` | Game thread, receives player input, dispatches to command registry |
 | `commands/core.nim` | `CmdResult` type, registry, dispatch, aliases |
 | `commands/cmd_*.nim` | Player-input handlers by context |
-| `api.nim` | Content-callable commands (`damage`, `addEffect`, `give`, etc.) |
-| `combat.nim` | Enemy AI, grid movement, trifecta resolution, spell casting |
+| `api.nim` | Content-callable commands (`damage`, `add_effect`, `give`, `give_xp`, `add_bounty`, `set_hostile`, `journal_write`, `journal_append`, etc.) |
+| `combat.nim` | Grid movement, trifecta resolution, player actions, aux spells, start/end/flee |
+| `combat_ai.nim` | AI condition DSL — `evalCondition`, `pickAction` (included by combat.nim) |
+| `combat_display.nim` | Status lines, weapon stats, option buttons (included by combat.nim) |
 | `world.nim` | Tile generation, room loading, NPC seeding, schedule resolution |
 | `saves.nim` | Serialize/deserialize GameState, dirty flush, working directory |
 | `clock.nim` | `passTicks()` — hunger, sleep deprivation, forwards to conditions |

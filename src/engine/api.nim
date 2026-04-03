@@ -26,6 +26,10 @@
 ##   set_focus     <target> <value>
 ##   give          <target> <item_id> [amount]    player-only
 ##   print         [<target>] <text...>
+##   add_bounty    <faction> <amount>             adjust bounty_<faction> variable
+##   set_hostile   <npc_id>                       mark an NPC hostile in npc_states
+##   journal_write <page> <text...>               overwrite journal page N (1-indexed)
+##   journal_append <text...>                     append line to last journal page
 ##   pause                                        injects __PAUSE__ sentinel
 
 import std/[json, options, strformat, strutils, sequtils, tables]
@@ -341,6 +345,51 @@ proc runCommand*(state: var GameState; cmd: string;
     let raw = parts[2]
     try:    state.variables[key] = newJFloat(parseFloat(raw))
     except: state.variables[key] = newJString(raw)
+
+  of "add_bounty":
+    # add_bounty <faction> <amount>  — adjust bounty variable for a faction
+    if parts.len < 3: return
+    let faction = parts[1]
+    var amount: int
+    try: amount = parseInt(parts[2])
+    except: return
+    let key  = &"bounty_{faction}"
+    let prev = state.variables.getOrDefault(key, %0).getInt(0)
+    state.variables[key] = %(prev + amount)
+
+  of "set_hostile":
+    # set_hostile <npc_id>  — mark an NPC hostile in npc_states
+    if parts.len < 2: return
+    let npcId = parts[1]
+    if npcId in state.npcStates and state.npcStates[npcId].kind == JObject:
+      state.npcStates[npcId]["hostile"] = %true
+    else:
+      state.npcStates[npcId] = %*{"hostile": true}
+
+  of "journal_write":
+    # journal_write <page> <text...>  — overwrite page N (1-indexed) with text
+    if parts.len < 3: return
+    var pageNum: int
+    try: pageNum = parseInt(parts[1]) - 1
+    except: return
+    if pageNum < 0: return
+    let text = parts[2..^1].join(" ")
+    while state.player.journal.len <= pageNum:
+      state.player.journal.add ""
+    state.player.journal[pageNum] = text
+
+  of "journal_append":
+    # journal_append <text...>  — append a line to the last journal page
+    if parts.len < 2: return
+    let text = parts[1..^1].join(" ")
+    if state.player.journal.len == 0:
+      state.player.journal.add text
+    else:
+      let last = state.player.journal.high
+      if state.player.journal[last] == "":
+        state.player.journal[last] = text
+      else:
+        state.player.journal[last] &= "\n" & text
 
   of "pause":
     return @[COMBAT_PAUSE]
