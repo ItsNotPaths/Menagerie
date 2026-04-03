@@ -86,7 +86,6 @@ proc gameThread(contentDir: string) {.thread.} =
     buildWorldDefIndex()
 
     # Init Lua scripting engine
-    scripting.scriptsDir = contentDir / "scripts"
     var scriptEng: ScriptEngine
     proc onLuaPrint(msg: string) = toUi.send(UiMsg(kind: umPrint, line: msg))
     scripting.initScriptEngine(scriptEng, onLuaPrint)

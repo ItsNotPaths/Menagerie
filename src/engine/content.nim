@@ -88,9 +88,10 @@ type
     tiles*:     seq[WorldTile]
 
   AssetIndex* = object
-    rooms*:   Table[string, string]   ## filename → relative path
+    rooms*:   Table[string, string]   ## filename → absolute path
     tiles*:   Table[string, string]
     sprites*: Table[string, string]
+    scripts*: Table[string, string]
 
 
 # ── Module-level content tables ───────────────────────────────────────────────
@@ -312,6 +313,8 @@ proc loadAssetIndex(dir: string) =
     for k, v in d["tiles"]: assetIndex.tiles[k] = v.getStr
   if d.hasKey("sprites") and d["sprites"].kind == JObject:
     for k, v in d["sprites"]: assetIndex.sprites[k] = v.getStr
+  if d.hasKey("scripts") and d["scripts"].kind == JObject:
+    for k, v in d["scripts"]: assetIndex.scripts[k] = v.getStr
 
 
 # ── Public API ────────────────────────────────────────────────────────────────

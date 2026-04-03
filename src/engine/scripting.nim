@@ -3,7 +3,7 @@
 
 import strutils, os
 import std/[json, tables]
-import state, api_types
+import state, api_types, content
 
 # Compile the full Lua runtime into the binary.
 # MAKE_LIB suppresses the lua/luac standalone main() symbols.
@@ -105,7 +105,6 @@ var gEngine*: ptr ScriptEngine = nil
 
 # ─── Script execution context ────────────────────────────────────────────────
 # Set before runScript, cleared after.  Lets cdecl callbacks reach game state.
-var scriptsDir*:    string = ""
 var gScriptState:   ptr GameState = nil
 var gScriptSelfId:  string = ""
 var gScriptLines:   seq[string] = @[]
@@ -215,11 +214,11 @@ proc callGlobal*(eng: var ScriptEngine; name: string;
   return ret != "false"
 
 proc runScript*(state: var GameState; scriptName, selfId: string): seq[string] =
-  ## Resolve scriptName relative to scriptsDir, execute it, and return any
+  ## Resolve scriptName via the asset index, execute it, and return any
   ## output lines produced via engine.cmd / engine.print / print inside Lua.
   ## selfId resolves "enemy.self" selectors within engine.cmd calls.
   if gEngine == nil: return
-  let path = if scriptsDir != "": scriptsDir / scriptName else: scriptName
+  let path = content.assetIndex.scripts.getOrDefault(scriptName, "")
   if not fileExists(path):
     if gEngine.onPrint != nil:
       gEngine.onPrint("[lua] script not found: " & path)
