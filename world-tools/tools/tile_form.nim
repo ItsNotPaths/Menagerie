@@ -11,7 +11,7 @@ import world_data
 
 const
   FORM_W    = 480
-  FORM_H    = 390
+  FORM_H    = 416   ## +26 for image row
   LABEL_W   = 112
   SWATCH_SZ = 14
   ROOM_ROWS = 4
@@ -27,12 +27,13 @@ type
     x*, y*:       int
     tile*:        string
     `type`*:      string
+    image*:       string
     entry_room*:  string
     rooms*:       seq[RoomRef]
     global_npcs*: seq[string]
     deleted*:     bool
 
-  TileField = enum tfNone, tfTile, tfEntryRoom, tfRoom, tfNpcAdd
+  TileField = enum tfNone, tfTile, tfEntryRoom, tfRoom, tfNpcAdd, tfImageFilter
 
   TileForm* = object
     open*:         bool
@@ -48,6 +49,11 @@ type
     tileCursor:   int
     selType:      int
     typeDropOpen: bool
+    imgFilterBuf:     string
+    imgFilterCursor:  int
+    imgFiles:         seq[string]   ## all image basenames (populated on open)
+    imgFiltered:      seq[string]   ## filtered subset
+    imgDropOpen:      bool
     entryBuf:     string
     entryCursor:  int
 
@@ -68,6 +74,8 @@ type
     # Layout cache (rebuilt each render)
     formX, formY: int
     tileFldR:     Rect
+    imgFldR:      Rect
+    imgDropR:     Rect
     entryFldR:    Rect
     typeBtnR:     Rect
     typeOptR:     array[4, Rect]
@@ -100,18 +108,30 @@ proc inRect(r: Rect; x, y: int): bool =
   x >= r.x.int and x < r.x.int + r.w.int and
   y >= r.y.int and y < r.y.int + r.h.int
 
+proc buildImgFiltered(form: var TileForm) =
+  let q = form.imgFilterBuf.toLowerAscii
+  if q.len == 0:
+    form.imgFiltered = form.imgFiles
+  else:
+    form.imgFiltered = @[]
+    for f in form.imgFiles:
+      if f.toLowerAscii.contains(q):
+        form.imgFiltered.add f
+
 proc packResult(form: TileForm): TileEntry =
-  result.x          = form.tileX
-  result.y          = form.tileY
-  result.tile       = form.tileBuf.strip()
-  result.`type`     = TILE_TYPES[form.selType]
-  result.entry_room = form.entryBuf.strip()
-  result.rooms      = form.roomLines.filterIt(it.strip().len > 0).mapIt(lineToRoom(it))
+  result.x           = form.tileX
+  result.y           = form.tileY
+  result.tile        = form.tileBuf.strip()
+  result.`type`      = TILE_TYPES[form.selType]
+  result.image       = form.imgFilterBuf.strip()
+  result.entry_room  = form.entryBuf.strip()
+  result.rooms       = form.roomLines.filterIt(it.strip().len > 0).mapIt(lineToRoom(it))
   result.global_npcs = form.npcTags
 
 # ── Open / Close ──────────────────────────────────────────────────────────────
 
-proc openFor*(form: var TileForm; entry: TileEntry; isForeign: bool) =
+proc openFor*(form: var TileForm; entry: TileEntry; isForeign: bool;
+              imageFiles: seq[string]) =
   form.open         = true
   form.isForeign    = isForeign
   form.wasSaved     = false
@@ -124,7 +144,12 @@ proc openFor*(form: var TileForm; entry: TileEntry; isForeign: bool) =
   form.selType      = 0
   for i, t in TILE_TYPES:
     if t == entry.`type`: form.selType = i; break
-  form.typeDropOpen = false
+  form.typeDropOpen    = false
+  form.imgFiles        = imageFiles
+  form.imgFilterBuf    = entry.image
+  form.imgFilterCursor = entry.image.len
+  form.imgDropOpen     = false
+  form.buildImgFiltered()
   form.entryBuf     = entry.entry_room
   form.entryCursor  = entry.entry_room.len
   form.roomLines    = entry.rooms.mapIt(roomToLine(it))
@@ -204,6 +229,27 @@ proc render*(form: var TileForm; ren: RendererPtr; font: FontPtr; fontH: int;
   renderText(ren, font, TILE_TYPES[form.selType] & (if editable: "  v" else: ""),
              tbx + 4, curY + (ROW_H - fontH) div 2 - 2,
              if editable: FG else: FG_DIM)
+  curY += ROW_H + 6
+
+  # ── Image ─────────────────────────────────────────────────────────────────────
+  renderText(ren, font, "Image:",
+             fx + PAD, curY + (ROW_H - fontH) div 2 - 2, FG_DIM)
+  let imgActive = form.activeField == tfImageFilter and editable
+  ren.fillRect(fieldX, curY, fieldW, ROW_H, BG)
+  ren.drawRect(fieldX, curY, fieldW, ROW_H,
+               if imgActive: FG_ACTIVE else: BG3)
+  let imgDisplayText =
+    if imgActive: form.imgFilterBuf
+    elif form.imgFilterBuf.len > 0: form.imgFilterBuf
+    else: "(none)"
+  renderText(ren, font, imgDisplayText,
+             fieldX + 4, curY + (ROW_H - fontH) div 2 - 2,
+             if not editable: FG_DIM elif imgActive: FG_ACTIVE
+             elif form.imgFilterBuf.len > 0: FG else: FG_DIM)
+  if imgActive and showCaret:
+    let cx = fieldX + 4 + textWidth(font, form.imgFilterBuf[0 ..< form.imgFilterCursor])
+    ren.drawVLine(cx, curY + 3, ROW_H - 6, FG_ACTIVE)
+  form.imgFldR = (fieldX.cint, curY.cint, fieldW.cint, ROW_H.cint)
   curY += ROW_H + 6
 
   # ── Entry room ───────────────────────────────────────────────────────────────
@@ -339,11 +385,40 @@ proc render*(form: var TileForm; ren: RendererPtr; font: FontPtr; fontH: int;
       renderText(ren, font, TILE_TYPES[i],
                  dx + SWATCH_SZ + 8, ry + (ROW_H - fontH) div 2 - 2, FG)
 
+  # ── Image dropdown (drawn on top of everything) ───────────────────────────────
+  if form.imgDropOpen and editable and form.imgFiltered.len > 0:
+    let dx = form.imgFldR.x.int
+    let dy = form.imgFldR.y.int + ROW_H
+    let dw = form.imgFldR.w.int
+    let maxRows = min(6, form.imgFiltered.len)
+    let dh = maxRows * ROW_H
+    form.imgDropR = (dx.cint, dy.cint, dw.cint, dh.cint)
+    ren.fillRect(dx, dy, dw, dh, DROP_BG)
+    ren.drawRect(dx, dy, dw, dh, BG3)
+    for i in 0 ..< maxRows:
+      let ry  = dy + i * ROW_H
+      let hot = mx >= dx and mx < dx + dw and my >= ry and my < ry + ROW_H
+      if hot: ren.fillRect(dx, ry, dw, ROW_H, DROP_HOV)
+      renderText(ren, font, form.imgFiltered[i],
+                 dx + 4, ry + (ROW_H - fontH) div 2 - 2,
+                 if hot: FG_ACTIVE else: FG)
+
 # ── Input ─────────────────────────────────────────────────────────────────────
 
 proc handleMouseDown*(form: var TileForm; x, y, btn: int) =
   if not form.open: return
   let editable = not form.isForeign
+
+  # Image dropdown intercepts when open
+  if form.imgDropOpen and editable:
+    if form.imgDropR.inRect(x, y):
+      let row = (y - form.imgDropR.y.int) div ROW_H
+      if row >= 0 and row < form.imgFiltered.len:
+        form.imgFilterBuf    = form.imgFiltered[row]
+        form.imgFilterCursor = form.imgFilterBuf.len
+        form.buildImgFiltered()
+    form.imgDropOpen = false
+    return
 
   # Type dropdown intercepts first when open
   if form.typeDropOpen and editable:
@@ -363,6 +438,14 @@ proc handleMouseDown*(form: var TileForm; x, y, btn: int) =
   # Tile name field
   if form.tileFldR.inRect(x, y) and editable:
     form.activeField = tfTile
+    return
+
+  # Image filter field
+  if form.imgFldR.inRect(x, y) and editable:
+    form.activeField     = tfImageFilter
+    form.imgFilterCursor = form.imgFilterBuf.len
+    form.buildImgFiltered()
+    form.imgDropOpen = true
     return
 
   # Entry room field
@@ -480,6 +563,11 @@ proc handleTextInput*(form: var TileForm; text: string) =
   of tfTile:
     form.tileBuf.insert(text, form.tileCursor)
     form.tileCursor += text.len
+  of tfImageFilter:
+    form.imgFilterBuf.insert(text, form.imgFilterCursor)
+    form.imgFilterCursor += text.len
+    form.buildImgFiltered()
+    form.imgDropOpen = true
   of tfEntryRoom:
     form.entryBuf.insert(text, form.entryCursor)
     form.entryCursor += text.len
@@ -495,6 +583,10 @@ proc handleKeyDown*(form: var TileForm; sym: Scancode; ctrl, shift: bool) =
   if not form.open: return
 
   if sym == SDL_SCANCODE_ESCAPE:
+    if form.imgDropOpen:
+      form.imgDropOpen = false
+      form.activeField = tfNone
+      return
     if form.typeDropOpen:
       form.typeDropOpen = false
     elif form.editRoom >= 0:
@@ -512,9 +604,37 @@ proc handleKeyDown*(form: var TileForm; sym: Scancode; ctrl, shift: bool) =
   of tfTile:
     case sym
     of SDL_SCANCODE_RETURN, SDL_SCANCODE_KP_ENTER:
-      form.activeField = tfEntryRoom
+      form.activeField = tfImageFilter
+      form.imgDropOpen = true
     else:
       navField(form.tileBuf, form.tileCursor)
+  of tfImageFilter:
+    case sym
+    of SDL_SCANCODE_RETURN, SDL_SCANCODE_KP_ENTER:
+      if form.imgFiltered.len > 0:
+        form.imgFilterBuf    = form.imgFiltered[0]
+        form.imgFilterCursor = form.imgFilterBuf.len
+        form.buildImgFiltered()
+      form.imgDropOpen = false
+      form.activeField = tfEntryRoom
+    of SDL_SCANCODE_BACKSPACE:
+      if form.imgFilterCursor > 0:
+        let i = form.imgFilterCursor - 1
+        form.imgFilterBuf = form.imgFilterBuf[0 ..< i] & form.imgFilterBuf[i + 1 .. ^1]
+        dec form.imgFilterCursor
+        form.buildImgFiltered()
+    of SDL_SCANCODE_DELETE:
+      if form.imgFilterCursor < form.imgFilterBuf.len:
+        let i = form.imgFilterCursor
+        form.imgFilterBuf = form.imgFilterBuf[0 ..< i] & form.imgFilterBuf[i + 1 .. ^1]
+        form.buildImgFiltered()
+    of SDL_SCANCODE_LEFT:
+      if form.imgFilterCursor > 0: dec form.imgFilterCursor
+    of SDL_SCANCODE_RIGHT:
+      if form.imgFilterCursor < form.imgFilterBuf.len: inc form.imgFilterCursor
+    of SDL_SCANCODE_HOME: form.imgFilterCursor = 0
+    of SDL_SCANCODE_END:  form.imgFilterCursor = form.imgFilterBuf.len
+    else: discard
   of tfEntryRoom:
     case sym
     of SDL_SCANCODE_RETURN, SDL_SCANCODE_KP_ENTER:

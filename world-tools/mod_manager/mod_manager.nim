@@ -15,13 +15,14 @@ import sdl2/ttf
 import std/[os, strutils, strformat, tables, algorithm]
 import plugin_db
 import lua_runner
+import assets_tab
 import "../theme"
 
 # ── Layout constants (mod_manager specific) ───────────────────────────────────
 
 const
-  WIN_W    = 760
-  WIN_H    = 548
+  WIN_W    = 1200
+  WIN_H    = 900
   HEADER_H = 30   ## modpack selector bar
 
 # ── Tab definitions ───────────────────────────────────────────────────────────
@@ -31,12 +32,15 @@ type TabDef = object
   toolId: string
   driver: string
 
-const TABS: array[4, TabDef] = [
-  TabDef(label: "World",   toolId: "world-tool",   driver: "world"),
-  TabDef(label: "Rooms",   toolId: "room-editor",  driver: "rooms"),
-  TabDef(label: "Vars",    toolId: "gameplay-vars", driver: "gameplay_vars"),
-  TabDef(label: "Inkwell", toolId: "inkwell",       driver: "menagerie"),
-]
+const
+  ASSETS_TAB = 0
+  TABS: array[5, TabDef] = [
+    TabDef(label: "Assets",  toolId: "assets",         driver: "assets"),
+    TabDef(label: "Inkwell", toolId: "inkwell",        driver: "menagerie"),
+    TabDef(label: "World",   toolId: "world-tool",    driver: "world"),
+    TabDef(label: "Rooms",   toolId: "room-editor",   driver: "rooms"),
+    TabDef(label: "Vars",    toolId: "gameplay-vars",  driver: "gameplay_vars"),
+  ]
 
 # ── Button ────────────────────────────────────────────────────────────────────
 
@@ -69,6 +73,8 @@ type App = object
   selIdx:    int
   scrollY:   int
 
+  assetsTab: AssetsTab
+
   status:   string
   statusOk: bool
 
@@ -83,7 +89,7 @@ type App = object
   mouseX, mouseY: int
   running: bool
 
-# ── SDL helpers ───────────────────────────────────────────────────────────────
+# ── SDL helpers (mod_manager local — different signatures from theme.nim) ──────
 
 proc setColor(ren: RendererPtr; c: Color) =
   discard ren.setDrawColor(c.r, c.g, c.b, c.a)
@@ -112,8 +118,6 @@ proc textWidth(app: App; text: string): int =
   return w.int
 
 proc textCy(containerY, containerH, fontH: int): int =
-  ## Vertical centre of text inside a container — nudged up 2px to
-  ## compensate for the descent region SDL_ttf includes in surface height.
   containerY + (containerH - fontH) div 2 - 2
 
 # ── Layout ────────────────────────────────────────────────────────────────────
@@ -163,96 +167,104 @@ proc render(app: var App) =
   # ── Tab strip ───────────────────────────────────────────────────────────────
   let tabW = WIN_W div TABS.len
   for i, t in TABS:
-    let tx = i * tabW
+    let tx    = i * tabW
+    let label = if i == ASSETS_TAB and app.assetsTab.vfsStale:
+                  t.label & " *"
+                else: t.label
     app.ren.setColor(if i == app.activeTab: TAB_ACT else: BG2)
     app.ren.fillRect(tx, HEADER_H, tabW, TAB_H)
     let col = if i == app.activeTab: FG_ACTIVE else: FG
-    let tw  = app.textWidth(t.label)
-    discard app.renderText(t.label,
+    let tw  = app.textWidth(label)
+    discard app.renderText(label,
                            tx + (tabW - tw) div 2,
                            textCy(HEADER_H, TAB_H, app.fontH), col)
 
   app.ren.setColor(BG3)
   app.ren.fillRect(0, HEADER_H + TAB_H - 1, WIN_W, 1)
 
-  # ── Plugin list ─────────────────────────────────────────────────────────────
-  let (lx, ly, lw, lh) = listArea()
-  app.ren.setColor(BG2)
-  app.ren.fillRect(lx, ly, lw, lh)
+  # ── Content area — assets tab or plugin list ────────────────────────────────
+  if app.activeTab == ASSETS_TAB:
+    app.assetsTab.render(app.ren, app.font, app.fontH, app.mouseX, app.mouseY,
+                         WIN_W, WIN_H, contentTop(), app.db)
+  else:
+    # ── Plugin list ───────────────────────────────────────────────────────────
+    let (lx, ly, lw, lh) = listArea()
+    app.ren.setColor(BG2)
+    app.ren.fillRect(lx, ly, lw, lh)
 
-  let tid      = TABS[app.activeTab].toolId
-  let plugins  = app.db.plugins.getOrDefault(tid)
-  let vis      = visibleRows()
-  let maxScroll = max(0, plugins.len - vis)
-  if app.scrollY > maxScroll: app.scrollY = maxScroll
+    let tid      = TABS[app.activeTab].toolId
+    let plugins  = app.db.plugins.getOrDefault(tid)
+    let vis      = visibleRows()
+    let maxScroll = max(0, plugins.len - vis)
+    if app.scrollY > maxScroll: app.scrollY = maxScroll
 
-  let colNum = 28
-  let colMst = 16
-  let colEn  = 20
-  let colRec = 72
+    let colNum = 28
+    let colMst = 16
+    let colEn  = 20
+    let colRec = 72
 
-  # List header row
-  app.ren.setColor(BG3)
-  app.ren.fillRect(lx, ly, lw, ROW_H)
-  let hcy = textCy(ly, ROW_H, app.fontH)
-  var hx = lx + PAD
-  discard app.renderText("#",       hx, hcy, FG_DIM)
-  discard app.renderText("M",  hx + colNum, hcy, FG_DIM)
-  discard app.renderText("+", hx + colNum + colMst, hcy, FG_DIM)
-  discard app.renderText("Name",    hx + colNum + colMst + colEn, hcy, FG_DIM)
-  discard app.renderText("Records", lx + lw - colRec - PAD, hcy, FG_DIM)
+    # List header row
+    app.ren.setColor(BG3)
+    app.ren.fillRect(lx, ly, lw, ROW_H)
+    let hcy = textCy(ly, ROW_H, app.fontH)
+    var hx = lx + PAD
+    discard app.renderText("#",       hx, hcy, FG_DIM)
+    discard app.renderText("M",  hx + colNum, hcy, FG_DIM)
+    discard app.renderText("+", hx + colNum + colMst, hcy, FG_DIM)
+    discard app.renderText("Name",    hx + colNum + colMst + colEn, hcy, FG_DIM)
+    discard app.renderText("Records", lx + lw - colRec - PAD, hcy, FG_DIM)
 
-  # Data rows
-  for row in 0 ..< vis:
-    let pidx = row + app.scrollY
-    if pidx >= plugins.len: break
-    let e  = plugins[pidx]
-    let ry = ly + ROW_H + row * ROW_H
-    let sel = pidx == app.selIdx
+    # Data rows
+    for row in 0 ..< vis:
+      let pidx = row + app.scrollY
+      if pidx >= plugins.len: break
+      let e  = plugins[pidx]
+      let ry = ly + ROW_H + row * ROW_H
+      let sel = pidx == app.selIdx
 
-    if sel:
-      app.ren.setColor(SEL_BG)
-      app.ren.fillRect(lx, ry, lw, ROW_H)
-    elif row mod 2 == 1:
-      app.ren.setColor((r: 30u8, g: 30u8, b: 30u8, a: 255u8))
-      app.ren.fillRect(lx, ry, lw, ROW_H)
+      if sel:
+        app.ren.setColor(SEL_BG)
+        app.ren.fillRect(lx, ry, lw, ROW_H)
+      elif row mod 2 == 1:
+        app.ren.setColor((r: 30u8, g: 30u8, b: 30u8, a: 255u8))
+        app.ren.fillRect(lx, ry, lw, ROW_H)
 
-    let cy = textCy(ry, ROW_H, app.fontH)
-    var cx = lx + PAD
+      let cy = textCy(ry, ROW_H, app.fontH)
+      var cx = lx + PAD
 
-    discard app.renderText($(pidx + 1), cx, cy, FG_DIM);  cx += colNum
-    if e.isMaster:
-      discard app.renderText("*", cx, cy, FG_MASTER)
-    cx += colMst
-    discard app.renderText(if e.enabled: "+" else: "-", cx, cy,
-                           if e.enabled: FG_OK else: FG_DIM)
-    cx += colEn
-    discard app.renderText(e.name, cx, cy, if e.enabled: FG else: FG_DIM)
+      discard app.renderText($(pidx + 1), cx, cy, FG_DIM);  cx += colNum
+      if e.isMaster:
+        discard app.renderText("*", cx, cy, FG_MASTER)
+      cx += colMst
+      discard app.renderText(if e.enabled: "+" else: "-", cx, cy,
+                             if e.enabled: FG_OK else: FG_DIM)
+      cx += colEn
+      discard app.renderText(e.name, cx, cy, if e.enabled: FG else: FG_DIM)
 
-    let recStr = $e.recordCount & " rec"
-    discard app.renderText(recStr, lx + lw - app.textWidth(recStr) - PAD, cy, FG_DIM)
+      let recStr = $e.recordCount & " rec"
+      discard app.renderText(recStr, lx + lw - app.textWidth(recStr) - PAD, cy, FG_DIM)
 
-  # ── Action buttons ──────────────────────────────────────────────────────────
-  let btnY = ly + lh + PAD
-  let bw   = 106
-  let gap  = 6
-  var bx   = PAD
+    # ── Action buttons ────────────────────────────────────────────────────────
+    let btnY = ly + lh + PAD
+    let bw   = 106
+    let gap  = 6
+    var bx   = PAD
 
-  app.drawBtn(app.btnMoveUp,    bx, btnY, bw, BTN_H, "^ Up");       bx += bw + gap
-  app.drawBtn(app.btnMoveDown,  bx, btnY, bw, BTN_H, "v Down");     bx += bw + gap
-  app.drawBtn(app.btnToggle,    bx, btnY, bw, BTN_H, "Toggle");      bx += bw + gap
-  app.drawBtn(app.btnExport,    bx, btnY, bw + 24, BTN_H, "Export Tab"); bx += bw + 24 + gap
-  app.drawBtn(app.btnExportAll, bx, btnY, bw + 24, BTN_H, "Export All")
+    app.drawBtn(app.btnMoveUp,    bx, btnY, bw, BTN_H, "^ Up");       bx += bw + gap
+    app.drawBtn(app.btnMoveDown,  bx, btnY, bw, BTN_H, "v Down");     bx += bw + gap
+    app.drawBtn(app.btnToggle,    bx, btnY, bw, BTN_H, "Toggle");      bx += bw + gap
+    app.drawBtn(app.btnExport,    bx, btnY, bw + 24, BTN_H, "Export Tab"); bx += bw + 24 + gap
+    app.drawBtn(app.btnExportAll, bx, btnY, bw + 24, BTN_H, "Export All")
 
   # ── Status bar ──────────────────────────────────────────────────────────────
   let sty = WIN_H - STATUS_H
-  app.ren.setColor(BG)
+  app.ren.setColor(BG2)
   app.ren.fillRect(0, sty, WIN_W, STATUS_H)
   app.ren.setColor(BG3)
-  app.ren.fillRect(0, sty, WIN_W, 1)
+  app.ren.fillRect(0, sty, WIN_W, 2)
   discard app.renderText(app.status, PAD,
                          textCy(sty, STATUS_H, app.fontH),
-                         if app.statusOk: FG_OK else: FG_DIM)
+                         if app.statusOk: FG_OK else: FG_DEL)
 
   # ── Modpack dropdown popup (drawn last / on top) ────────────────────────────
   if app.dropdownOpen and app.modpacks.len > 0:
@@ -264,7 +276,6 @@ proc render(app: var App) =
     app.ren.setColor(DROP_BG)
     app.ren.fillRect(popX, popY, popW, popH)
     app.ren.setColor(BG3)
-    # border
     var border: Rect = (popX.cint, popY.cint, popW.cint, popH.cint)
     discard app.ren.drawRect(border)
 
@@ -291,27 +302,12 @@ proc loadModpack(app: var App) =
   app.db = scan(app.dataDir / mp)
   app.selIdx  = -1
   app.scrollY = 0
+  app.assetsTab.refreshVFS(app.db)
+  app.assetsTab.vfsStale = true
   app.status   = "Loaded: " & mp
   app.statusOk = true
 
 # ── Export ────────────────────────────────────────────────────────────────────
-
-proc exportTab(app: var App; tabIdx: int) =
-  let t       = TABS[tabIdx]
-  let luaPath = app.driversDir / t.driver / (t.driver & ".lua")
-  if not fileExists(luaPath):
-    app.status = "Driver not found: " & luaPath; app.statusOk = false; return
-
-  var ds: DriverState
-  ds.init()
-  defer: ds.close()
-  if not ds.loadDriver(luaPath):
-    app.status = "Failed to load driver: " & t.driver; app.statusOk = false; return
-
-  createDir(app.contentDir)
-  let n = ds.runExport(app.db.enabledPlugins(t.toolId), app.contentDir)
-  if n < 0: app.status = fmt"[{t.label}] export failed";          app.statusOk = false
-  else:     app.status = fmt"[{t.label}] exported {n} file(s)";   app.statusOk = true
 
 proc exportAssets(app: var App) =
   let luaPath = app.driversDir / "assets" / "assets.lua"
@@ -334,10 +330,34 @@ proc exportAssets(app: var App) =
   if n < 0: app.status = "Assets export failed";            app.statusOk = false
   else:     app.status = fmt"Assets: mapped {n} file(s)";   app.statusOk = true
 
+proc exportTab(app: var App; tabIdx: int) =
+  if TABS[tabIdx].toolId == "assets":
+    app.exportAssets()
+    if app.statusOk:
+      app.assetsTab.rebuildVFS(app.db)
+    return
+
+  let t       = TABS[tabIdx]
+  let luaPath = app.driversDir / t.driver / (t.driver & ".lua")
+  if not fileExists(luaPath):
+    app.status = "Driver not found: " & luaPath; app.statusOk = false; return
+
+  var ds: DriverState
+  ds.init()
+  defer: ds.close()
+  if not ds.loadDriver(luaPath):
+    app.status = "Failed to load driver: " & t.driver; app.statusOk = false; return
+
+  createDir(app.contentDir)
+  let n = ds.runExport(app.db.enabledPlugins(t.toolId), app.contentDir)
+  if n < 0: app.status = fmt"[{t.label}] export failed";          app.statusOk = false
+  else:     app.status = fmt"[{t.label}] exported {n} file(s)";   app.statusOk = true
+
 proc exportAll(app: var App) =
   var total = 0
   var failed = false
   for i in 0 ..< TABS.len:
+    if TABS[i].toolId == "assets": continue  ## handled below via exportAssets
     let luaPath = app.driversDir / TABS[i].driver / (TABS[i].driver & ".lua")
     if not fileExists(luaPath): continue
     var ds: DriverState
@@ -348,6 +368,8 @@ proc exportAll(app: var App) =
     ds.close()
     if n >= 0: total += n else: failed = true
   app.exportAssets()
+  if app.statusOk:
+    app.assetsTab.rebuildVFS(app.db)
   if failed: app.status = fmt"Done with errors — {total} file(s)"; app.statusOk = false
   else:      app.status = fmt"Export complete — {total} file(s)";  app.statusOk = true
 
@@ -361,7 +383,6 @@ proc handleClick(app: var App; x, y: int) =
     let popW = max(app.btnModpack.rect.w.int, 200)
     let popH = app.modpacks.len * ROW_H + 4
     if x >= popX and x < popX + popW and y >= popY and y < popY + popH:
-      # Click inside popup — select modpack
       let row = (y - popY - 2) div ROW_H
       if row >= 0 and row < app.modpacks.len:
         app.modpackIdx = row
@@ -381,8 +402,29 @@ proc handleClick(app: var App; x, y: int) =
     let ti = x div (WIN_W div TABS.len)
     if ti >= 0 and ti < TABS.len:
       app.activeTab = ti
-      app.selIdx    = -1
-      app.scrollY   = 0
+      if ti != ASSETS_TAB:
+        app.selIdx    = -1
+        app.scrollY   = 0
+    return
+
+  # Assets tab — delegate all content-area clicks
+  if app.activeTab == ASSETS_TAB:
+    var aStatus = ""; var aOk = true
+    case app.assetsTab.handleClick(x, y, app.db, aStatus, aOk)
+    of aaUpdateVFS:
+      app.assetsTab.rebuildVFS(app.db)
+      let n = app.assetsTab.vfs.entries.len
+      app.exportAssets()
+      if app.statusOk:
+        app.assetsTab.vfsStale = false
+        app.status   = "VFS updated — " & $n & " entries  |  " & app.status
+        app.statusOk = true
+    of aaExportAll:
+      app.exportAll()
+    of aaNone:
+      if aStatus.len > 0:
+        app.status   = aStatus
+        app.statusOk = aOk
     return
 
   # Plugin list rows (skip header row)
@@ -408,8 +450,11 @@ proc handleClick(app: var App; x, y: int) =
   elif contains(app.btnExportAll.rect, x, y):
     app.exportAll()
 
-proc handleScroll(app: var App; dy: int) =
+proc handleScroll(app: var App; x, y, dy: int) =
   if app.dropdownOpen: return
+  if app.activeTab == ASSETS_TAB:
+    app.assetsTab.handleScroll(x, y, dy)
+    return
   let maxS = max(0, app.db.plugins.getOrDefault(TABS[app.activeTab].toolId).len - visibleRows())
   app.scrollY = clamp(app.scrollY + dy, 0, maxS)
 
@@ -438,10 +483,11 @@ proc main() =
   discard app.font.sizeUtf8("Ag", addr fW, addr fH)
   app.fontH = fH.int
 
-  app.running  = true
-  app.status   = "Ready"
-  app.statusOk = true
-  app.selIdx   = -1
+  app.running   = true
+  app.status    = "Ready"
+  app.statusOk  = true
+  app.selIdx    = -1
+  app.assetsTab = initAssetsTab()
 
   # Discover modpacks
   for kind, path in walkDir(app.dataDir):
@@ -462,20 +508,22 @@ proc main() =
         if ev.button.button == BUTTON_LEFT:
           handleClick(app, ev.button.x.int, ev.button.y.int)
       of MouseWheel:
-        handleScroll(app, -ev.wheel.y.int)
+        handleScroll(app, app.mouseX, app.mouseY, -ev.wheel.y.int)
       of KeyDown:
         case ev.key.keysym.sym
         of K_ESCAPE:
           if app.dropdownOpen: app.dropdownOpen = false
           else: app.running = false
         of K_UP:
-          if app.selIdx > 0: dec app.selIdx
-          if app.selIdx < app.scrollY: app.scrollY = app.selIdx
+          if app.activeTab != ASSETS_TAB:
+            if app.selIdx > 0: dec app.selIdx
+            if app.selIdx < app.scrollY: app.scrollY = app.selIdx
         of K_DOWN:
-          let L = app.db.plugins.getOrDefault(TABS[app.activeTab].toolId).len
-          if app.selIdx < L - 1: inc app.selIdx
-          if app.selIdx >= app.scrollY + visibleRows():
-            app.scrollY = app.selIdx - visibleRows() + 1
+          if app.activeTab != ASSETS_TAB:
+            let L = app.db.plugins.getOrDefault(TABS[app.activeTab].toolId).len
+            if app.selIdx < L - 1: inc app.selIdx
+            if app.selIdx >= app.scrollY + visibleRows():
+              app.scrollY = app.selIdx - visibleRows() + 1
         else: discard
       else: discard
 

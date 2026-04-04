@@ -34,11 +34,12 @@ type
     meta:    PluginMeta
     presets: Table[string, RoomPreset]
     path:    string
+    dirty:   bool
 
   PresetItem = tuple[id: string; pidx: int]
 
   EditField = enum
-    efNone, efSearch, efName, efDescLine, efEnemyAdd
+    efNone, efSearch, efName, efDescLine, efEnemyAdd, efImageFilter
 
   DropTarget = enum dtNone, dtCategory, dtType, dtImage
 
@@ -47,7 +48,7 @@ type
     selPluginIdx: int
     modpackDir:   string
     contentDir:   string
-    imageFiles:   seq[string]   ## basenames scanned from contentDir/images/rooms/
+    imageFiles:   seq[string]   ## basenames scanned from modpackDir plugin asset folders
 
     filtered:    seq[PresetItem]
     selPresetId: string
@@ -74,6 +75,11 @@ type
 
     ## Dropdown
     dropOpen: DropTarget
+
+    ## Image filter text input
+    imageFilterBuf:    string
+    imageFilterCursor: int
+    imageFiltered:     seq[string]  # subset of imageFiles matching imageFilterBuf
 
     ## Sprite canvas overlay
     sc: SpriteCanvas
@@ -166,8 +172,9 @@ proc toJson(p: RoomsPlugin): JsonNode =
     presetsObj[id] = pn
   result["presets"] = presetsObj
 
-proc save(p: RoomsPlugin) =
+proc save(p: var RoomsPlugin) =
   savePluginJson(p.path, p.toJson())
+  p.dirty = false
 
 # ── Helpers ────────────────────────────────────────────────────────────────────
 
@@ -178,6 +185,16 @@ proc activePlugin(rt: var RoomsTab): ptr RoomsPlugin =
   if rt.selPluginIdx >= 0 and rt.selPluginIdx < rt.plugins.len:
     addr rt.plugins[rt.selPluginIdx]
   else: nil
+
+proc buildImageFiltered(rt: var RoomsTab) =
+  let q = rt.imageFilterBuf.toLowerAscii
+  if q.len == 0:
+    rt.imageFiltered = rt.imageFiles
+  else:
+    rt.imageFiltered = @[]
+    for f in rt.imageFiles:
+      if f.toLowerAscii.contains(q):
+        rt.imageFiltered.add f
 
 proc buildFiltered(rt: var RoomsTab) =
   ## Merge presets from all enabled plugins (last-write-wins per id),
@@ -204,21 +221,33 @@ proc buildFiltered(rt: var RoomsTab) =
 
 # ── Load ──────────────────────────────────────────────────────────────────────
 
-proc scanImageFiles(contentDir: string): seq[string] =
-  ## Collect basenames of image files under contentDir/images/rooms/.
+proc scanImageFiles(modpackDir: string): seq[string] =
+  ## Collect basenames of image files by scanning plugin folders in modpackDir
+  ## for any subfolder named "assets", then recursively finding images inside.
+  ## Never reads content/ — works from source data only.
   const IMG_EXTS = [".png", ".jpg", ".jpeg", ".webp"]
-  let dir = contentDir / "images" / "rooms"
-  if not dirExists(dir): return
-  for f in walkDirRec(dir):
-    let ext = f.splitFile.ext.toLowerAscii
-    if ext in IMG_EXTS:
-      result.add f.splitFile.name & ext
+  if not dirExists(modpackDir): return
+  var seen: Table[string, bool]
+  for kind, pluginDir in walkDir(modpackDir):
+    if kind != pcDir: continue
+    let assetsDir = pluginDir / "assets"
+    if not dirExists(assetsDir): continue
+    for f in walkDirRec(assetsDir):
+      let ext = f.splitFile.ext.toLowerAscii
+      if ext in IMG_EXTS:
+        let basename = f.splitFile.name & ext
+        if not seen.hasKey(basename):
+          seen[basename] = true
+          result.add basename
   result.sort()
 
 proc reload*(rt: var RoomsTab; modpackDir, contentDir: string) =
   rt.modpackDir   = modpackDir
   rt.contentDir   = contentDir
-  rt.imageFiles   = scanImageFiles(contentDir)
+  rt.imageFiles   = scanImageFiles(modpackDir)
+  rt.imageFiltered = rt.imageFiles
+  rt.imageFilterBuf = ""
+  rt.imageFilterCursor = 0
   rt.plugins      = @[]
   let entries = scanModpack(modpackDir, "room-editor")
   for e in entries:
@@ -244,6 +273,16 @@ proc reloadForPlugin*(rt: var RoomsTab; activePluginPath: string) =
     if p.path == activePluginPath:
       rt.selPluginIdx = i
       return
+
+proc isDirty*(rt: RoomsTab): bool =
+  rt.selPluginIdx >= 0 and rt.selPluginIdx < rt.plugins.len and
+  rt.plugins[rt.selPluginIdx].dirty
+
+proc saveActive*(rt: var RoomsTab) =
+  if rt.selPluginIdx >= 0 and rt.selPluginIdx < rt.plugins.len:
+    rt.plugins[rt.selPluginIdx].save()
+    rt.statusMsg = "Saved"
+    rt.statusOk  = true
 
 # ── Edit helpers ──────────────────────────────────────────────────────────────
 
@@ -277,25 +316,29 @@ proc commitEdit(rt: var RoomsTab) =
   let field = rt.editField
   if field == efNone or field == efSearch:
     rt.editField = efNone; return
+  if field == efImageFilter:
+    rt.editField = efNone
+    rt.dropOpen  = dtNone
+    return
   let ap = rt.activePlugin()
   if ap.isNil or not ap.presets.hasKey(rt.selPresetId):
     rt.editField = efNone; return
   case field
   of efName:
     ap.presets[rt.selPresetId].name = rt.editBuf
-    ap[].save()
+    ap.dirty = true
   of efDescLine:
     rt.syncDescLine()
     ap.presets[rt.selPresetId].description = rt.editDescLines.join("\n")
-    ap[].save()
+    ap.dirty = true
   of efEnemyAdd:
     let tag = rt.editBuf.strip()
     if tag.len > 0 and tag notin ap.presets[rt.selPresetId].enemies:
       ap.presets[rt.selPresetId].enemies.add tag
-      ap[].save()
+      ap.dirty = true
   else: discard
   rt.editField = efNone
-  rt.statusMsg = "Saved"
+  rt.statusMsg = "Unsaved changes"
   rt.statusOk  = true
 
 # ── Rendering ─────────────────────────────────────────────────────────────────
@@ -482,17 +525,31 @@ proc renderForm(rt: var RoomsTab; ren: RendererPtr; font: FontPtr;
       ren.drawHLine(ix, ldy + ROW_H - 1, iw, BG3)
   cy += rt.fDescH + PAD
 
-  ## image (dropdown)
+  ## image (filter input + dropdown)
   rt.fImageY = cy
+  let imgFilterActive = rt.editField == efImageFilter
   let imgOpen = rt.dropOpen == dtImage
-  let imgHot  = not isForeign and inR(mx, my, ix, cy, iw, ROW_H)
   renderText(ren, font, "image", lx, cy + (ROW_H - fontH) div 2 - 2, FG_DIM)
-  ren.fillRect(ix, cy, iw, ROW_H, if imgOpen: SEL_BG elif imgHot: BTN_HOV else: BG2)
-  ren.drawRect(ix, cy, iw, ROW_H, BG3)
-  let imgLabel = if pr.image.len > 0: pr.image else: "(none)"
-  renderText(ren, font, imgLabel & "  [v]", ix + PAD,
-             cy + (ROW_H - fontH) div 2 - 2,
-             if isForeign or rt.imageFiles.len == 0: FG_DIM else: FG)
+  ren.fillRect(ix, cy, iw, ROW_H, BG2)
+  ren.drawRect(ix, cy, iw, ROW_H,
+               if imgFilterActive: FG_ACTIVE elif imgOpen: BG3 else: BG3)
+  ## show filter text when active, otherwise show current value
+  let imgDisplayText =
+    if imgFilterActive: rt.imageFilterBuf
+    elif pr.image.len > 0: pr.image
+    else: "(none)"
+  let imgTextCol =
+    if isForeign: FG_DIM
+    elif imgFilterActive: FG_ACTIVE
+    elif pr.image.len > 0: FG
+    else: FG_DIM
+  renderText(ren, font, imgDisplayText, ix + PAD,
+             cy + (ROW_H - fontH) div 2 - 2, imgTextCol)
+  if imgFilterActive:
+    let showC = (getTicks().int div 530) mod 2 == 0
+    if showC:
+      let cx2 = ix + PAD + textWidth(font, rt.imageFilterBuf[0 ..< rt.imageFilterCursor])
+      ren.drawVLine(cx2, cy + 3, ROW_H - 6, FG_ACTIVE)
   cy += ROW_H + PAD
 
   ## enemies
@@ -587,7 +644,7 @@ proc renderDropdown(rt: var RoomsTab; ren: RendererPtr; font: FontPtr;
   let items: seq[string] = case rt.dropOpen
     of dtCategory: @CATEGORIES
     of dtType:     @ROOM_TYPES
-    of dtImage:    rt.imageFiles
+    of dtImage:    rt.imageFiltered
     else: @[]
   if items.len == 0:
     rt.dropOpen = dtNone; return
@@ -653,8 +710,8 @@ proc handleMouseDown*(rt: var RoomsTab; x, y, btn: int; activePluginPath: string
         let ap = rt.activePlugin()
         if not ap.isNil and ap.presets.hasKey(rt.selPresetId):
           ap.presets[rt.selPresetId].sprite_positions = rt.sc.positions
-          ap[].save()
-          rt.statusMsg = "Saved"; rt.statusOk = true
+          ap.dirty = true
+          rt.statusMsg = "Unsaved changes"; rt.statusOk = true
         rt.sc.open = false; return
       if inR(x, y, rt.sc.cancelRect.x, rt.sc.cancelRect.y,
              rt.sc.cancelRect.w, rt.sc.cancelRect.h):
@@ -675,15 +732,18 @@ proc handleMouseDown*(rt: var RoomsTab; x, y, btn: int; activePluginPath: string
         of dtCategory:
           if row >= 0 and row < CATEGORIES.len:
             ap.presets[rt.selPresetId].category = CATEGORIES[row]
-            ap[].save(); rt.statusMsg = "Saved"; rt.statusOk = true
+            ap.dirty = true; rt.statusMsg = "Unsaved changes"; rt.statusOk = true
         of dtType:
           if row >= 0 and row < ROOM_TYPES.len:
             ap.presets[rt.selPresetId].`type` = ROOM_TYPES[row]
-            ap[].save(); rt.statusMsg = "Saved"; rt.statusOk = true
+            ap.dirty = true; rt.statusMsg = "Unsaved changes"; rt.statusOk = true
         of dtImage:
-          if row >= 0 and row < rt.imageFiles.len:
-            ap.presets[rt.selPresetId].image = rt.imageFiles[row]
-            ap[].save(); rt.statusMsg = "Saved"; rt.statusOk = true
+          if row >= 0 and row < rt.imageFiltered.len:
+            ap.presets[rt.selPresetId].image = rt.imageFiltered[row]
+            ap.dirty = true; rt.statusMsg = "Unsaved changes"; rt.statusOk = true
+            rt.imageFilterBuf    = rt.imageFiltered[row]
+            rt.imageFilterCursor = rt.imageFilterBuf.len
+            rt.editField = efNone
         else: discard
     rt.dropOpen = dtNone; return
 
@@ -739,7 +799,7 @@ proc handleMouseDown*(rt: var RoomsTab; x, y, btn: int; activePluginPath: string
             newId = rt.selPresetId & "-copy" & $n; inc n
           srcPr.id = newId
           ap.presets[newId] = srcPr
-          ap[].save()
+          ap.dirty = true
           rt.buildFiltered()
           rt.selPresetId = newId
           rt.initDescLines(srcPr.description)
@@ -750,7 +810,7 @@ proc handleMouseDown*(rt: var RoomsTab; x, y, btn: int; activePluginPath: string
       let ap = rt.activePlugin()
       if not ap.isNil and ap.presets.hasKey(rt.selPresetId):
         ap.presets[rt.selPresetId].deleted = true
-        ap[].save()
+        ap.dirty = true
         let delId = rt.selPresetId
         rt.buildFiltered()
         rt.selPresetId = ""
@@ -798,12 +858,18 @@ proc handleMouseDown*(rt: var RoomsTab; x, y, btn: int; activePluginPath: string
     rt.enterDescLine(lineIdx)
     return
 
-  ## image dropdown toggle
+  ## image filter input — click opens it for typing and shows dropdown
   if inR(x, y, rt.fInputX, rt.fImageY, rt.fInputW, ROW_H) and not isForeign:
-    if rt.imageFiles.len > 0:
-      if rt.editField == efDescLine: rt.syncDescLine()
-      rt.commitEdit()
-      rt.dropOpen = if rt.dropOpen == dtImage: dtNone else: dtImage
+    if rt.editField == efDescLine: rt.syncDescLine()
+    rt.commitEdit()
+    ## Pre-fill with current image value so user can refine it
+    let curImage = rt.plugins[dispPidx].presets[rt.selPresetId].image
+    if rt.editField != efImageFilter:
+      rt.imageFilterBuf = curImage
+    rt.editField         = efImageFilter
+    rt.imageFilterCursor = rt.imageFilterBuf.len
+    rt.buildImageFiltered()
+    rt.dropOpen = dtImage
     return
 
   ## enemy chip × buttons
@@ -813,7 +879,7 @@ proc handleMouseDown*(rt: var RoomsTab; x, y, btn: int; activePluginPath: string
     if inR(x, y, xBtn, cr.y, ROW_H div 2 + 4, cr.h):
       if not ap.isNil and ap.presets.hasKey(rt.selPresetId):
         ap.presets[rt.selPresetId].enemies.delete(i)
-        ap[].save(); rt.statusMsg = "Saved"; rt.statusOk = true
+        ap.dirty = true; rt.statusMsg = "Unsaved changes"; rt.statusOk = true
       return
 
   ## + Add button
@@ -836,7 +902,7 @@ proc handleMouseDown*(rt: var RoomsTab; x, y, btn: int; activePluginPath: string
     if not ap.isNil:
       let pr = rt.plugins[dispPidx].presets[rt.selPresetId]
       ap.presets[rt.selPresetId] = pr
-      ap[].save()
+      ap.dirty = true
       rt.buildFiltered()
       rt.initDescLines(pr.description)
       rt.statusMsg = "Copied to active plugin"; rt.statusOk = true
@@ -872,6 +938,11 @@ proc handleTextInput*(rt: var RoomsTab; text: string) =
   of efName, efEnemyAdd, efDescLine:
     rt.editBuf.insert(text, rt.editCursorPos)
     rt.editCursorPos += text.len
+  of efImageFilter:
+    rt.imageFilterBuf.insert(text, rt.imageFilterCursor)
+    rt.imageFilterCursor += text.len
+    rt.buildImageFiltered()
+    rt.dropOpen = dtImage
   else: discard
 
 proc handleKeyDown*(rt: var RoomsTab; sym: Scancode; ctrl, shift: bool) =
@@ -886,7 +957,7 @@ proc handleKeyDown*(rt: var RoomsTab; sym: Scancode; ctrl, shift: bool) =
           ap.presets[id] = RoomPreset(id: id, name: id,
                                       category: CATEGORIES[0],
                                       `type`:   ROOM_TYPES[0])
-          ap[].save()
+          ap.dirty = true
           rt.buildFiltered()
           rt.selPresetId = id
           rt.initDescLines("")
@@ -915,8 +986,8 @@ proc handleKeyDown*(rt: var RoomsTab; sym: Scancode; ctrl, shift: bool) =
     else: discard
     return
 
-  ## Dropdown
-  if rt.dropOpen != dtNone:
+  ## Dropdown (non-image): eat all keys except Escape
+  if rt.dropOpen != dtNone and rt.editField != efImageFilter:
     if sym == SDL_SCANCODE_ESCAPE: rt.dropOpen = dtNone
     return
 
@@ -965,7 +1036,7 @@ proc handleKeyDown*(rt: var RoomsTab; sym: Scancode; ctrl, shift: bool) =
       let ap = rt.activePlugin()
       if not ap.isNil and ap.presets.hasKey(rt.selPresetId):
         ap.presets[rt.selPresetId].description = rt.editDescLines.join("\n")
-        ap[].save()
+        ap.dirty = true
       rt.editField = efNone
     of SDL_SCANCODE_BACKSPACE:
       if rt.editCursorPos > 0:
@@ -1036,6 +1107,44 @@ proc handleKeyDown*(rt: var RoomsTab; sym: Scancode; ctrl, shift: bool) =
           rt.descScrollY = newLine - DESC_LINES + 1
     of SDL_SCANCODE_HOME: rt.editCursorPos = 0
     of SDL_SCANCODE_END:  rt.editCursorPos = rt.editBuf.len
+    else: discard
+    return
+
+  ## Image filter input
+  if rt.editField == efImageFilter:
+    case sym
+    of SDL_SCANCODE_ESCAPE:
+      rt.editField = efNone
+      rt.dropOpen  = dtNone
+    of SDL_SCANCODE_RETURN, SDL_SCANCODE_KP_ENTER:
+      ## Pick first filtered result if any
+      if rt.imageFiltered.len > 0:
+        let chosen = rt.imageFiltered[0]
+        let ap = rt.activePlugin()
+        if not ap.isNil and ap.presets.hasKey(rt.selPresetId):
+          ap.presets[rt.selPresetId].image = chosen
+          ap.dirty = true; rt.statusMsg = "Unsaved changes"; rt.statusOk = true
+        rt.imageFilterBuf    = chosen
+        rt.imageFilterCursor = chosen.len
+      rt.editField = efNone
+      rt.dropOpen  = dtNone
+    of SDL_SCANCODE_BACKSPACE:
+      if rt.imageFilterCursor > 0:
+        let i = rt.imageFilterCursor - 1
+        rt.imageFilterBuf = rt.imageFilterBuf[0 ..< i] & rt.imageFilterBuf[i + 1 .. ^1]
+        dec rt.imageFilterCursor
+        rt.buildImageFiltered()
+    of SDL_SCANCODE_DELETE:
+      if rt.imageFilterCursor < rt.imageFilterBuf.len:
+        let i = rt.imageFilterCursor
+        rt.imageFilterBuf = rt.imageFilterBuf[0 ..< i] & rt.imageFilterBuf[i + 1 .. ^1]
+        rt.buildImageFiltered()
+    of SDL_SCANCODE_LEFT:
+      if rt.imageFilterCursor > 0: dec rt.imageFilterCursor
+    of SDL_SCANCODE_RIGHT:
+      if rt.imageFilterCursor < rt.imageFilterBuf.len: inc rt.imageFilterCursor
+    of SDL_SCANCODE_HOME: rt.imageFilterCursor = 0
+    of SDL_SCANCODE_END:  rt.imageFilterCursor = rt.imageFilterBuf.len
     else: discard
     return
 

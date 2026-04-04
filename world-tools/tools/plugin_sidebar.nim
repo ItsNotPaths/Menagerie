@@ -29,6 +29,8 @@ type
 
     pluginsChanged*:  bool    ## set after create/delete; cleared by main.nim
     lastCreatedPath*: string  ## path of most-recently created plugin (or "")
+    saveRequested*:   bool    ## set when Save button clicked; cleared by main.nim
+    dirty*:           bool    ## set by main.nim before render to highlight Save btn
 
     modpackDir: string
     toolId:     string
@@ -45,6 +47,7 @@ type
     btnUp:     SidebarBtn
     btnDown:   SidebarBtn
     btnDel:    SidebarBtn
+    btnSave:   SidebarBtn
     btnCreate: SidebarBtn
     btnCancel: SidebarBtn
 
@@ -224,8 +227,8 @@ proc render*(sb: var Sidebar; ren: RendererPtr; font: FontPtr; fontH: int;
   # ── Bottom button row (hidden when form is open) ─────────────────────────
   let btnRowY  = y + h - BTN_ROW_H - PAD
   let formH    = fontH * 2 + ROW_H + BTN_H + PAD * 5 + 2  ## form panel height
-  let newBtnY  = btnRowY - BTN_H - BTN_PAD
-  let dividerY = newBtnY - PAD div 2
+  let newBtnY  = btnRowY - BTN_H - BTN_PAD    ## Save Plugin button
+  let dividerY = newBtnY - BTN_H - BTN_PAD * 2 - PAD div 2  ## above New Plugin + Save
 
   if not sb.newPluginMode:
     let bw = (w - PAD * 2 - BTN_PAD * 4) div 5
@@ -241,8 +244,14 @@ proc render*(sb: var Sidebar; ren: RendererPtr; font: FontPtr; fontH: int;
     btn(btnDown,   "v",    FG)
     btn(btnDel,    "Del",  FG_DEL)
 
+    let saveFg  = if sb.dirty: FG_OK else: FG_DIM
+    let newBtnY2 = newBtnY - BTN_H - BTN_PAD
     drawBtn(ren, font, fontH, sb.btnNew,
-            x + PAD, newBtnY, w - PAD * 2, BTN_H, "+ New Plugin", FG_OK, mx, my)
+            x + PAD, newBtnY2, w - PAD * 2, BTN_H, "+ New Plugin", FG_OK, mx, my)
+    drawBtn(ren, font, fontH, sb.btnSave,
+            x + PAD, newBtnY, w - PAD * 2, BTN_H,
+            if sb.dirty: "* Save Plugin" else: "Save Plugin",
+            saveFg, mx, my)
     ren.drawHLine(x, dividerY, w, BG3)
 
   # ── New-plugin inline form ───────────────────────────────────────────────
@@ -252,7 +261,7 @@ proc render*(sb: var Sidebar; ren: RendererPtr; font: FontPtr; fontH: int;
 
   # ── Plugin list ──────────────────────────────────────────────────────────
   let listBottom = if sb.newPluginMode: y + h - formH - PAD
-                   else:                dividerY
+                   else:                dividerY + PAD div 2
   sb.listY = y + PAD
   sb.listH = listBottom - sb.listY
   sb.listW = w
@@ -396,6 +405,10 @@ proc handleMouseDown*(sb: var Sidebar; x, y, btn: int;
     sb.pluginsChanged  = true
     sb.lastCreatedPath = ""
     sb.statusMsg = "Plugin deleted"; sb.statusOk = true
+    return
+
+  if sb.btnSave.rect.contains(x, y):
+    sb.saveRequested = true
     return
 
   if sb.btnNew.rect.contains(x, y):

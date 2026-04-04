@@ -35,3 +35,9 @@ proc gvInt*(key: string; default: int): int =
     gvData[key].getInt(default)
   else:
     default
+
+proc gvStr*(key: string; default: string): string =
+  if gvData.kind == JObject and gvData.hasKey(key):
+    gvData[key].getStr(default)
+  else:
+    default

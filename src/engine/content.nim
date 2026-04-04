@@ -88,9 +88,7 @@ type
     tiles*:     seq[WorldTile]
 
   AssetIndex* = object
-    rooms*:   Table[string, string]   ## filename → absolute path
-    tiles*:   Table[string, string]
-    sprites*: Table[string, string]
+    files*:   Table[string, string]   ## filename → absolute path (all asset types)
     scripts*: Table[string, string]
 
 
@@ -307,12 +305,8 @@ proc loadAssetIndex(dir: string) =
   if not fileExists(path): return
   let d = loadJson(path)
   if d.kind != JObject: return
-  if d.hasKey("rooms") and d["rooms"].kind == JObject:
-    for k, v in d["rooms"]: assetIndex.rooms[k] = v.getStr
-  if d.hasKey("tiles") and d["tiles"].kind == JObject:
-    for k, v in d["tiles"]: assetIndex.tiles[k] = v.getStr
-  if d.hasKey("sprites") and d["sprites"].kind == JObject:
-    for k, v in d["sprites"]: assetIndex.sprites[k] = v.getStr
+  if d.hasKey("files") and d["files"].kind == JObject:
+    for k, v in d["files"]: assetIndex.files[k] = v.getStr
   if d.hasKey("scripts") and d["scripts"].kind == JObject:
     for k, v in d["scripts"]: assetIndex.scripts[k] = v.getStr
 

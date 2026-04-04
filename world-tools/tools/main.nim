@@ -265,6 +265,11 @@ proc render(app: var App) =
   let (sx, sy, sw, sh) = app.sidebarRect
   let (ax, ay, aw, ah) = app.tabAreaRect
 
+  app.sidebar.dirty = case app.activeTab
+    of 0: app.worldTab.isDirty()
+    of 1: app.roomsTab.isDirty()
+    of 2: app.varsTab.isDirty()
+    else: false
   app.sidebar.render(app.ren, app.font, app.fontH, sx, sy, sw, sh,
                      TABS[app.activeTab].toolId, app.mouseX, app.mouseY)
   app.ren.drawVLine(sx + sw, sy, sh, BG3)
@@ -348,6 +353,13 @@ proc handleMouseDown(app: var App; x, y, btn, clicks: int) =
   if x >= sx and x < sx + sw:
     app.sidebar.handleMouseDown(x, y, btn,
                                 app.cfg.modpackDir, TABS[app.activeTab].toolId)
+    if app.sidebar.saveRequested:
+      app.sidebar.saveRequested = false
+      case app.activeTab
+      of 0: app.worldTab.saveActive()
+      of 1: app.roomsTab.saveActive()
+      of 2: app.varsTab.saveActive()
+      else: discard
     if app.sidebar.pluginsChanged:
       let created = app.sidebar.lastCreatedPath
       app.sidebar.pluginsChanged  = false

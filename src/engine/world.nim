@@ -13,6 +13,7 @@ import engine/state
 import engine/content
 import engine/clock
 import engine/saves
+import engine/gameplay_vars
 
 # ── Terrain constants ─────────────────────────────────────────────────────────
 
@@ -23,14 +24,6 @@ let terrainTicks = {
   "road":   4, "ruin":   8, "dungeon":  8,  "town":  4,
 }.toTable
 
-let tileDefaultImages = {
-  "town":      "town.png",      "dungeon":    "dungeon.png",
-  "road":      "road.png",      "crossroads": "crossroad.png",
-  "ruin":      "ruin.png",
-  "forest":    "wilderness.png", "plains":   "wilderness.png",
-  "mountain":  "wilderness.png", "swamp":    "wilderness.png",
-  "desert":    "wilderness.png",
-}.toTable
 
 let descriptors = {
   "forest": @[
@@ -174,22 +167,20 @@ proc movementTicks*(state: GameState; x, y: int): int =
 
 # ── Asset resolution ──────────────────────────────────────────────────────────
 
-proc resolveAsset(category, filename: string): string =
-  case category
-  of "rooms":   content.assetIndex.rooms.getOrDefault(filename, "")
-  of "tiles":   content.assetIndex.tiles.getOrDefault(filename, "")
-  of "sprites": content.assetIndex.sprites.getOrDefault(filename, "")
-  else: ""
+proc resolveAsset(filename: string): string =
+  content.assetIndex.files.getOrDefault(filename, "")
 
 
 proc tileImagePath*(state: GameState; x, y: int): string =
-  ## Return image path for a world tile. "" if none found.
+  ## Return image path for a world tile.
+  ## Uses tile's custom image if set, otherwise falls back to gameplay var
+  ## "tile_<type>_img" (e.g. tile_town_img = "town.png"). "" if none found.
   let tile = getTile(state, x, y)
-  if tile.image != "":
-    return resolveAsset("tiles", tile.image)
-  let filename = tileDefaultImages.getOrDefault(tile.tileType, "")
+  let filename =
+    if tile.image != "": tile.image
+    else: gvStr("tile_" & tile.tileType & "_img", "")
   if filename == "": return ""
-  resolveAsset("tiles", filename)
+  resolveAsset(filename)
 
 
 proc roomImagePath*(state: GameState): string =
@@ -198,7 +189,7 @@ proc roomImagePath*(state: GameState): string =
   if roomId == "": return ""
   let room = content.getRoom(roomId)
   if room.image == "": return ""
-  resolveAsset("rooms", room.image)
+  resolveAsset(room.image)
 
 
 # ── Category helpers ──────────────────────────────────────────────────────────

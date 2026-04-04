@@ -275,7 +275,7 @@ proc cbRemoveDir(L: LuaStatePtr): cint {.cdecl.} =
 proc cbJsonEncode(L: LuaStatePtr): cint {.cdecl.} =
   ## json_encode(table) → JSON string. Accepts any Lua value.
   let node = luaToJson(L, 1)
-  discard lua_pushstring(L, ($node).cstring)
+  discard lua_pushstring(L, node.pretty.cstring)
   return 1
 
 proc cbPrint(L: LuaStatePtr): cint {.cdecl.} =

@@ -16,9 +16,10 @@ type
     value: string  ## stored as raw JSON string representation
 
   VarsPlugin = object
-    meta: PluginMeta
-    vars: seq[VarRow]
-    path: string
+    meta:  PluginMeta
+    vars:  seq[VarRow]
+    path:  string
+    dirty: bool
 
   EditMode = enum emNone, emKey, emValue
 
@@ -62,8 +63,9 @@ proc toJson(p: VarsPlugin): JsonNode =
     except: varsNode[r.key] = newJString(r.value)
   result["vars"] = varsNode
 
-proc save(p: VarsPlugin) =
+proc save(p: var VarsPlugin) =
   savePluginJson(p.path, p.toJson())
+  p.dirty = false
 
 proc activePlugin(vt: var VarsTab): ptr VarsPlugin =
   if vt.selPluginIdx >= 0 and vt.selPluginIdx < vt.plugins.len:
@@ -101,7 +103,7 @@ proc reload*(vt: var VarsTab; modpackDir: string; seedPath: string = "") =
       if merged.len > 0:
         for k, v in merged:
           vt.plugins[seedIdx].vars.add VarRow(key: k, value: v)
-        vt.plugins[seedIdx].save()
+        vt.plugins[seedIdx].save()  # seed save is automatic, not user-initiated
     vt.selPluginIdx = seedIdx
 
 proc reloadForPlugin*(vt: var VarsTab; activePluginPath: string) =
@@ -109,6 +111,16 @@ proc reloadForPlugin*(vt: var VarsTab; activePluginPath: string) =
     if p.path == activePluginPath:
       vt.selPluginIdx = i
       return
+
+proc isDirty*(vt: VarsTab): bool =
+  vt.selPluginIdx >= 0 and vt.selPluginIdx < vt.plugins.len and
+  vt.plugins[vt.selPluginIdx].dirty
+
+proc saveActive*(vt: var VarsTab) =
+  if vt.selPluginIdx >= 0 and vt.selPluginIdx < vt.plugins.len:
+    vt.plugins[vt.selPluginIdx].save()
+    vt.statusMsg = "Saved"
+    vt.statusOk  = true
 
 # ── Edit helpers ──────────────────────────────────────────────────────────────
 
@@ -126,9 +138,9 @@ proc commitEdit(vt: var VarsTab) =
   of emKey:   p.vars[vt.editRowIdx].key   = vt.editBuf
   of emValue: p.vars[vt.editRowIdx].value = vt.editBuf
   else: discard
-  p[].save()
+  p.dirty      = true
   vt.editMode  = emNone
-  vt.statusMsg = "Saved"
+  vt.statusMsg = "Unsaved changes"
   vt.statusOk  = true
 
 # ── Rendering ─────────────────────────────────────────────────────────────────

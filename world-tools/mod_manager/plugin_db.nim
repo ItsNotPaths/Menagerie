@@ -11,7 +11,7 @@ import std/[json, os, strutils, tables, sequtils]
 
 # ── Known tool tabs (order = tab display order) ───────────────────────────────
 
-const TOOL_IDS* = ["world-tool", "room-editor", "gameplay-vars", "inkwell"]
+const TOOL_IDS* = ["world-tool", "room-editor", "gameplay-vars", "inkwell", "assets"]
 
 # ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -35,6 +35,16 @@ proc orderFile(modpackDir: string): string =
   modpackDir / "load_order.json"
 
 proc loadOrderFor(modpackDir, toolId: string): seq[string] =
+  if toolId == "assets":
+    ## Assets order: data/<modpack>/assets/load_order.json — JSON array of folder names.
+    let assetsDir = modpackDir / "assets"
+    let path = assetsDir / "load_order.json"
+    try:
+      let j = parseFile(path)
+      if j.kind == JArray:
+        return j.elems.mapIt(assetsDir / it.getStr)
+    except: discard
+    return @[]
   let path = orderFile(modpackDir)
   try:
     let j = parseFile(path)
@@ -44,6 +54,15 @@ proc loadOrderFor(modpackDir, toolId: string): seq[string] =
   return @[]
 
 proc saveOrderFor*(modpackDir, toolId: string; paths: seq[string]) =
+  if toolId == "assets":
+    ## Assets order stored as an array of folder names (no full paths for portability).
+    let assetsDir = modpackDir / "assets"
+    let path = assetsDir / "load_order.json"
+    createDir(assetsDir)
+    var arr = newJArray()
+    for p in paths: arr.add newJString(lastPathPart(p))
+    writeFile(path, arr.pretty)
+    return
   let path = orderFile(modpackDir)
   var j: JsonNode
   try:   j = parseFile(path)
@@ -75,8 +94,10 @@ proc scan*(modpackDir: string): PluginDb =
   for tid in TOOL_IDS:
     result.plugins[tid] = @[]
 
-  # Discover all plugins, keyed by abs path
+  # Discover all plugins, keyed by abs path (or folder path for assets plugins)
   var found: Table[string, PluginEntry]
+
+  # Regular plugins: <modpackDir>/<subfolder>/<plugin>.json with nested meta
   for kind, folder in walkDir(modpackDir):
     if kind != pcDir: continue
     for kind2, fpath in walkDir(folder):
@@ -97,6 +118,27 @@ proc scan*(modpackDir: string): PluginDb =
         e.enabled     = meta.getOrDefault("enabled").getBool(true)
         e.recordCount = countRecords(raw)
         found[fpath]  = e
+      except: discard
+
+  # Dedicated assets plugins: <modpackDir>/assets/<pluginDir>/meta.json (flat format)
+  # Key is the plugin folder path (not the meta.json path) for order-file compatibility.
+  let assetsBase = modpackDir / "assets"
+  if dirExists(assetsBase):
+    for kind, pluginDir in walkDir(assetsBase):
+      if kind != pcDir: continue
+      let metaPath = pluginDir / "meta.json"
+      if not fileExists(metaPath): continue
+      try:
+        let raw = parseFile(metaPath)
+        if raw.getOrDefault("tool").getStr != "assets": continue
+        var e: PluginEntry
+        e.path     = pluginDir  ## folder path used as key for order-file lookups
+        e.folder   = pluginDir
+        e.toolId   = "assets"
+        e.name     = raw.getOrDefault("name").getStr(lastPathPart(pluginDir))
+        e.isMaster = raw.getOrDefault("is_master").getBool(false)
+        e.enabled  = raw.getOrDefault("enabled").getBool(true)
+        found[pluginDir] = e
       except: discard
 
   # Apply saved load order; append any newly discovered plugins at the end
@@ -136,10 +178,17 @@ proc toggleEnabled*(db: var PluginDb; tid: string; idx: int) =
   let e = addr db.plugins[tid][idx]
   e.enabled = not e.enabled
   try:
-    var raw = parseFile(e.path)
-    if raw.hasKey("meta") and raw["meta"].kind == JObject:
-      raw["meta"]["enabled"] = newJBool(e.enabled)
-    writeFile(e.path, raw.pretty)
+    if tid == "assets":
+      ## Assets plugins use a flat meta.json (no nested "meta" key).
+      let metaPath = e.folder / "meta.json"
+      var raw = parseFile(metaPath)
+      raw["enabled"] = newJBool(e.enabled)
+      writeFile(metaPath, raw.pretty)
+    else:
+      var raw = parseFile(e.path)
+      if raw.hasKey("meta") and raw["meta"].kind == JObject:
+        raw["meta"]["enabled"] = newJBool(e.enabled)
+      writeFile(e.path, raw.pretty)
   except: discard
 
 proc enabledPlugins*(db: PluginDb; tid: string): seq[PluginEntry] =

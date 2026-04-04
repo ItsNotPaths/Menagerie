@@ -4,7 +4,7 @@
 
 import sdl2
 import sdl2/ttf
-import std/[json, tables, strformat, math]
+import std/[json, tables, strformat, math, os, strutils, algorithm, sets]
 import "../theme"
 import plugin_meta
 import plugin_io
@@ -31,6 +31,7 @@ type
     world_seed: int
     tiles:      Table[(int, int), TileEntry]
     path:       string
+    dirty:      bool
 
   MergedTile = object
     entry:    TileEntry
@@ -42,6 +43,7 @@ type
     plugins:      seq[WorldPlugin]
     selPluginIdx: int
     modpackDir:   string
+    imageFiles:   seq[string]   ## basenames scanned from modpack asset folders
 
     # Canvas state
     offsetX, offsetY: float
@@ -83,6 +85,7 @@ proc tileToJson(t: TileEntry): JsonNode =
   result["y"]          = newJInt(t.y)
   result["tile"]       = newJString(t.tile)
   result["type"]       = newJString(t.`type`)
+  result["image"]      = newJString(t.image)
   result["entry_room"] = newJString(t.entry_room)
   var roomsArr = newJArray()
   for r in t.rooms:
@@ -102,6 +105,7 @@ proc tileFromJson(j: JsonNode): TileEntry =
   result.y          = j.getOrDefault("y").getInt
   result.tile       = j.getOrDefault("tile").getStr
   result.`type`     = j.getOrDefault("type").getStr("road")
+  result.image      = j.getOrDefault("image").getStr
   result.entry_room = j.getOrDefault("entry_room").getStr
   result.deleted    = j.getOrDefault("deleted").getBool(false)
   if j.hasKey("rooms") and j["rooms"].kind == JArray:
@@ -123,8 +127,9 @@ proc toJson(p: WorldPlugin): JsonNode =
     if not t.deleted: tilesArr.add tileToJson(t)
   result["tiles"] = tilesArr
 
-proc save(p: WorldPlugin) =
+proc save(p: var WorldPlugin) =
   savePluginJson(p.path, p.toJson())
+  p.dirty = false
 
 proc loadWorldPlugin(path: string): WorldPlugin =
   result.path = path
@@ -139,8 +144,26 @@ proc loadWorldPlugin(path: string): WorldPlugin =
 
 # ── Plugin management ─────────────────────────────────────────────────────────
 
+proc scanImageFiles(modpackDir: string): seq[string] =
+  const IMG_EXTS = [".png", ".jpg", ".jpeg", ".webp"]
+  if not dirExists(modpackDir): return
+  var seen: HashSet[string]
+  for kind, pluginDir in walkDir(modpackDir):
+    if kind != pcDir: continue
+    let assetsDir = pluginDir / "assets"
+    if not dirExists(assetsDir): continue
+    for f in walkDirRec(assetsDir):
+      let ext = f.splitFile.ext.toLowerAscii
+      if ext in IMG_EXTS:
+        let basename = f.splitFile.name & ext
+        if basename notin seen:
+          seen.incl basename
+          result.add basename
+  result.sort()
+
 proc reload*(wt: var WorldTab; modpackDir, contentDir: string) =
   wt.modpackDir    = modpackDir
+  wt.imageFiles    = scanImageFiles(modpackDir)
   wt.plugins       = @[]
   let entries = scanModpack(modpackDir, "world-tool")
   for e in entries:
@@ -167,6 +190,16 @@ proc reloadForPlugin*(wt: var WorldTab; activePluginPath: string) =
         wt.redoStack    = @[]
         wt.undoPlugin   = i
       return
+
+proc isDirty*(wt: WorldTab): bool =
+  wt.selPluginIdx >= 0 and wt.selPluginIdx < wt.plugins.len and
+  wt.plugins[wt.selPluginIdx].dirty
+
+proc saveActive*(wt: var WorldTab) =
+  if wt.selPluginIdx >= 0 and wt.selPluginIdx < wt.plugins.len:
+    wt.plugins[wt.selPluginIdx].save()
+    wt.statusMsg = "Saved"
+    wt.statusOk  = true
 
 # ── Canvas helpers ────────────────────────────────────────────────────────────
 
@@ -196,7 +229,7 @@ proc doUndo*(wt: var WorldTab) =
   wt.redoStack.add p.tiles
   if wt.redoStack.len > MAX_UNDO: wt.redoStack.delete(0)
   p.tiles = wt.undoStack.pop()
-  p[].save()
+  p.dirty = true
   wt.statusMsg = "Undo"
   wt.statusOk  = true
 
@@ -206,7 +239,7 @@ proc doRedo*(wt: var WorldTab) =
   wt.undoStack.add p.tiles
   if wt.undoStack.len > MAX_UNDO: wt.undoStack.delete(0)
   p.tiles = wt.redoStack.pop()
-  p[].save()
+  p.dirty = true
   wt.statusMsg = "Redo"
   wt.statusOk  = true
 
@@ -222,14 +255,14 @@ proc paintTile(wt: var WorldTab; tx, ty: int) =
     tile: fmt"tile_{tx}_{ty}",
     `type`: TILE_TYPES[wt.selTileType]
   )
-  wt.plugins[wt.selPluginIdx].save()
+  wt.plugins[wt.selPluginIdx].dirty = true
 
 proc eraseTile(wt: var WorldTab; tx, ty: int) =
   if wt.selPluginIdx < 0: return
   if not wt.plugins[wt.selPluginIdx].tiles.hasKey((tx, ty)): return
   pushUndo(wt)
   wt.plugins[wt.selPluginIdx].tiles.del((tx, ty))
-  wt.plugins[wt.selPluginIdx].save()
+  wt.plugins[wt.selPluginIdx].dirty = true
   wt.hasSel = false
 
 # ── Rendering ─────────────────────────────────────────────────────────────────
@@ -362,11 +395,11 @@ proc processFormResults(wt: var WorldTab) =
       let entry = wt.tileForm.resultEntry
       pushUndo(wt)
       wt.plugins[wt.selPluginIdx].tiles[(entry.x, entry.y)] = entry
-      wt.plugins[wt.selPluginIdx].save()
+      wt.plugins[wt.selPluginIdx].dirty = true
       wt.hasSel   = true
       wt.selTileX = entry.x
       wt.selTileY = entry.y
-      wt.statusMsg = "Tile saved"
+      wt.statusMsg = "Unsaved changes"
       wt.statusOk  = true
   elif wt.tileForm.wasCopied:
     wt.tileForm.wasCopied = false
@@ -374,7 +407,7 @@ proc processFormResults(wt: var WorldTab) =
       let entry = wt.tileForm.resultEntry
       pushUndo(wt)
       wt.plugins[wt.selPluginIdx].tiles[(entry.x, entry.y)] = entry
-      wt.plugins[wt.selPluginIdx].save()
+      wt.plugins[wt.selPluginIdx].dirty = true
       wt.hasSel   = true
       wt.selTileX = entry.x
       wt.selTileY = entry.y
@@ -435,7 +468,7 @@ proc handleMouseDown*(wt: var WorldTab; x, y, btn, clicks: int;
     if clicks >= 2 and merged.hasKey((tx, ty)):
       # Double-click → open tile form
       let mt = merged[(tx, ty)]
-      wt.tileForm.openFor(mt.entry, not mt.isActive)
+      wt.tileForm.openFor(mt.entry, not mt.isActive, wt.imageFiles)
       wt.hasSel   = true
       wt.selTileX = tx
       wt.selTileY = ty
