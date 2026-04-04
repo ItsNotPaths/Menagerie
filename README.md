@@ -59,5 +59,3 @@ docker-build/               release build scripts and Dockerfile
 plans/                      design documentation
 saves/                      save files
 ```
-
-`plans/STATUS.md` is the live implementation status and todo list.

@@ -15,43 +15,14 @@ import sdl2/ttf
 import std/[os, strutils, strformat, tables, algorithm]
 import plugin_db
 import lua_runner
+import "../theme"
 
-# ── Embedded font (compile-time) ──────────────────────────────────────────────
-
-const FONT_DATA = staticRead("../../vendor/fonts/SpaceMono-Regular.ttf")
-
-# ── Theme ─────────────────────────────────────────────────────────────────────
-
-type Color = tuple[r, g, b, a: uint8]
-
-const
-  BG        : Color = (17,  17,  17,  255)
-  BG2       : Color = (26,  26,  26,  255)
-  BG3       : Color = (46,  46,  46,  255)
-  FG        : Color = (204, 204, 204, 255)
-  FG_DIM    : Color = (85,  85,  85,  255)
-  FG_ACTIVE : Color = (212, 201, 168, 255)  ## parchment — matches game fg
-  FG_OK     : Color = (102, 204, 136, 255)
-  FG_MASTER : Color = (255, 204, 102, 255)
-  SEL_BG    : Color = (55,  55,  55,  255)  ## light grey row selection
-  BTN_BG    : Color = (58,  58,  58,  255)
-  BTN_HOV   : Color = (74,  74,  74,  255)
-  TAB_ACT   : Color = (52,  52,  52,  255)  ## light grey active tab
-  DROP_BG   : Color = (36,  36,  36,  255)
-  DROP_HOV  : Color = (55,  55,  55,  255)  ## light grey dropdown hover
-
-# ── Layout constants ──────────────────────────────────────────────────────────
+# ── Layout constants (mod_manager specific) ───────────────────────────────────
 
 const
   WIN_W    = 760
   WIN_H    = 548
-  FONT_SIZE = 14
   HEADER_H = 30   ## modpack selector bar
-  TAB_H    = 30   ## tab strip
-  ROW_H    = 22
-  BTN_H    = 26
-  STATUS_H = 24
-  PAD      = 10
 
 # ── Tab definitions ───────────────────────────────────────────────────────────
 
@@ -123,8 +94,7 @@ proc fillRect(ren: RendererPtr; x, y, w, h: int) =
 
 proc renderText(app: App; text: string; x, y: int; c: Color): int =
   if text.len == 0: return 0
-  var col: sdl2.Color = (c.r, c.g, c.b, c.a)
-  let surf = app.font.renderUtf8Solid(text.cstring, col)
+  let surf = app.font.renderUtf8Solid(text.cstring, c)
   if surf == nil: return 0
   let tex = app.ren.createTextureFromSurface(surf)
   freeSurface(surf)

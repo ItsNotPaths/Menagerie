@@ -12,7 +12,7 @@ usage() {
     echo ""
     echo "  --game     Compile the game binary, verify deps, copy to release dir"
     echo "  --manager  Compile the mod manager, place it in the project root"
-    echo "  --tools    (not yet implemented) World tools editor → world-tools/"
+    echo "  --tools    Compile world tools editor → world-tools/world_tools"
     echo ""
     echo "Flags are composable: build.sh --game --manager"
 }
@@ -42,12 +42,9 @@ for arg in "$@"; do
     esac
 done
 
-if $BUILD_TOOLS; then
-    echo "==> --tools: world tools editor not yet implemented, skipping."
-    BUILD_TOOLS=false
-fi
+  # no early-out; handled below
 
-if ! $BUILD_GAME && ! $BUILD_MANAGER; then
+if ! $BUILD_GAME && ! $BUILD_MANAGER && ! $BUILD_TOOLS; then
     echo "Nothing to build."
     exit 0
 fi
@@ -136,11 +133,29 @@ if $BUILD_MANAGER; then
     echo "==> [manager] Done: $RELEASE_DIR/mod_manager"
 fi
 
-# ── --tools (future) ──────────────────────────────────────────────────────────
-# When implemented:
-#   - Compiles src/world_tools.nim
-#   - Strips the binary
-#   - Moves it to world-tools/world_tools  (next to world-tools/drivers/)
+# ── --tools ───────────────────────────────────────────────────────────────────
+
+if $BUILD_TOOLS; then
+    echo "==> [tools] Compiling release binary..."
+    docker run --rm \
+        -v "$PROJECT_DIR":/src \
+        -v "$PROJECT_DIR/docker-build/nim.cfg":/src/nim.cfg:ro \
+        -w /src \
+        "$IMAGE_NAME" \
+        sh -c "nim c -d:release -o:world_tools world-tools/tools/main.nim && strip --strip-all world_tools"
+
+    fix_owner "$PROJECT_DIR/world_tools"
+
+    echo "==> [tools] Verifying dynamic dependencies..."
+    check_sdl2_static "$PROJECT_DIR/world_tools"
+
+    echo "==> [tools] Copying to release directory..."
+    mkdir -p "$RELEASE_DIR/world-tools"
+    cp    "$PROJECT_DIR/world_tools"          "$RELEASE_DIR/world-tools/world_tools"
+    rm    "$PROJECT_DIR/world_tools"
+
+    echo "==> [tools] Done: $RELEASE_DIR/world-tools/world_tools"
+fi
 
 # ── Summary ───────────────────────────────────────────────────────────────────
 
@@ -148,3 +163,4 @@ echo ""
 echo "Build complete."
 $BUILD_GAME    && echo "  game:    $RELEASE_DIR/menagerie"
 $BUILD_MANAGER && echo "  manager: $RELEASE_DIR/mod_manager"
+$BUILD_TOOLS   && echo "  tools:   $RELEASE_DIR/world-tools/world_tools"
