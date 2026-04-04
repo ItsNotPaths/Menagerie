@@ -103,7 +103,6 @@ if $BUILD_GAME; then
     mkdir -p "$RELEASE_DIR"
     cp    "$PROJECT_DIR/menagerie"   "$RELEASE_DIR/menagerie"
     rm    "$PROJECT_DIR/menagerie"
-    cp    "$PROJECT_DIR/settings.txt" "$RELEASE_DIR/settings.txt"
 
     echo "==> [game] Done: $RELEASE_DIR/menagerie"
 fi

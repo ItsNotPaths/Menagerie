@@ -10,18 +10,19 @@
 ##   let dur  = gvInt("pin_duration", 2)
 
 import std/[json, os]
+import log
 
 var gvData: JsonNode = newJNull()
 
 proc loadGameplayVars*(contentDir: string) =
   let path = contentDir / "gameplay_vars.json"
   if not fileExists(path):
-    echo "gameplay_vars: file not found at " & path & " (using hardcoded defaults)"
+    logWarn("gameplay_vars: file not found at " & path & " (using hardcoded defaults)")
     return
   try:
     gvData = parseFile(path)
   except CatchableError as e:
-    echo "gameplay_vars: malformed " & path & " — " & e.msg & " (using hardcoded defaults)"
+    logError("gameplay_vars: malformed " & path & " — " & e.msg & " (using hardcoded defaults)")
     gvData = newJNull()
 
 proc gvFloat*(key: string; default: float): float =

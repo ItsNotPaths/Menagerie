@@ -16,7 +16,8 @@ type
     umPanelReplace,  ## replace scrollback with fixed panel lines
     umPanelAppend,   ## append lines to the scrollback panel
     umQuit,          ## shut down the SDL2 window
-    umJournalOpen    ## open the journal overlay
+    umJournalOpen,   ## open the journal overlay
+    umPrefill        ## set the input bar text (cursor placed at end)
 
   SpriteEntry* = object
     path*:    string
@@ -41,6 +42,8 @@ type
     of umJournalOpen:
       jPages*: seq[string]   ## one string per page
       jIdx*:   int           ## page to open to
+    of umPrefill:
+      prefillText*: string   ## text to place in the input bar
 
   GameMsgKind* = enum gmInput, gmJournalSave
   GameMsg* = object

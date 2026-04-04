@@ -35,6 +35,7 @@ import state
 import content
 import skills
 import gameplay_vars
+import log
 
 
 const
@@ -232,7 +233,7 @@ proc loadFromWorking(): GameState =
   result = initGameState()
   let pj = try: parseFile(workingDir / "player.json")
            except CatchableError as e:
-             echo "saves.loadFromWorking: cannot read player.json — " & e.msg
+             logError("saves.loadFromWorking: cannot read player.json — " & e.msg)
              raise
   result.player = playerFromJson(pj)
 
@@ -241,14 +242,14 @@ proc loadFromWorking(): GameState =
     try:
       result.variables = jsonToTable(parseFile(vPath))
     except CatchableError as e:
-      echo "saves.loadFromWorking: malformed variables.json — " & e.msg
+      logError("saves.loadFromWorking: malformed variables.json — " & e.msg)
 
   let nPath = workingDir / "npc_states.json"
   if fileExists(nPath):
     try:
       result.npcStates = jsonToTable(parseFile(nPath))
     except CatchableError as e:
-      echo "saves.loadFromWorking: malformed npc_states.json — " & e.msg
+      logError("saves.loadFromWorking: malformed npc_states.json — " & e.msg)
 
   result.context = ctxWorld
 
@@ -291,7 +292,7 @@ proc loadDirtyTile*(state: var GameState; key: string): bool =
       state.dirty[key] = parseFile(path)
       return true
     except CatchableError as e:
-      echo "saves.loadDirtyTile: malformed " & path & " — " & e.msg
+      logError("saves.loadDirtyTile: malformed " & path & " — " & e.msg)
   return false
 
 

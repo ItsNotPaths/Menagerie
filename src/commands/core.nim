@@ -24,6 +24,7 @@ type
     isError*:     bool
     quit*:        bool          ## signal game thread to shut down
     openJournal*: bool          ## signal game thread to send umJournalOpen
+    prefill*:     string        ## pre-populate the input bar after this response
 
 
 proc ok*(lines: varargs[string]): CmdResult =

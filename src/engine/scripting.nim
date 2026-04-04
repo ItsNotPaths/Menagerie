@@ -3,7 +3,7 @@
 
 import strutils, os
 import std/[json, tables]
-import state, api_types, content
+import state, api_types, content, log
 
 # Compile the full Lua runtime into the binary.
 # MAKE_LIB suppresses the lua/luac standalone main() symbols.
@@ -122,7 +122,7 @@ proc luaPrintImpl(L: LuaStatePtr): cint {.cdecl.} =
   elif gEngine != nil and gEngine.onPrint != nil:
     gEngine.onPrint(msg)
   else:
-    echo "[lua] ", msg
+    logInfo("[lua] " & msg)
   return 0
 
 proc luaEngineCmdImpl(L: LuaStatePtr): cint {.cdecl.} =

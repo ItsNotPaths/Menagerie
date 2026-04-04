@@ -1,5 +1,6 @@
 import std/os
 import engine/game_loop
+import engine/log
 import ui/text_window
 
 proc findContentDir(): string =
@@ -10,5 +11,6 @@ proc findContentDir(): string =
   if dirExists(cwd): return cwd
   quit("Cannot find content/ directory.", 1)
 
+openLog(getAppDir())
 startGameThread(findContentDir())
 main()

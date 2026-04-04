@@ -6,9 +6,3 @@ travel_pause=0.3
 
 # number of autosave slots to keep before oldest is overwritten (default 5)
 auto_slots=5
-
-spell-editor.data_dir=/run/media/paths/SSS-Core/python projects/Menagerie/data/base-game/plugins
-room-editor.data_dir=/run/media/paths/SSS-Core/python projects/Menagerie/data/base-game/plugins
-world-editor.data_dir=/run/media/paths/SSS-Core/python projects/Menagerie/data/base-game/plugins
-world-tool.data_dir=/run/media/paths/SSS-Core/python projects/Menagerie/data/base-game/plugins
-gameplay-vars.data_dir=/run/media/paths/SSS-Core/python projects/Menagerie/data/base-game/plugins

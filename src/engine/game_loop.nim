@@ -8,6 +8,7 @@
 import std/[json, os, strformat, random]
 import state
 import content
+import gameplay_vars
 import world
 import clock
 import api
@@ -69,6 +70,8 @@ proc pushResult(res: CmdResult; state: GameState) =
       toUi.send(UiMsg(kind: umPanelAppend, appendLines: res.panelLines))
     else:
       toUi.send(UiMsg(kind: umPanelReplace, replaceLines: res.panelLines))
+  if res.prefill != "":
+    toUi.send(UiMsg(kind: umPrefill, prefillText: res.prefill))
   pushStats(state)
 
 
@@ -83,6 +86,7 @@ proc gameThread(contentDir: string) {.thread.} =
     # Load settings and content
     settings.loadSettings("settings.txt")
     loadContent(contentDir)
+    loadGameplayVars(contentDir)
     buildWorldDefIndex()
 
     # Init Lua scripting engine

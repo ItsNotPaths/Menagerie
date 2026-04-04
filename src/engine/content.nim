@@ -7,6 +7,7 @@
 ## contentDir is the path to the content/ directory.
 
 import std/[json, os, tables]
+import log
 
 # ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -119,7 +120,7 @@ proc loadJson(path: string): JsonNode =
   try:
     result = parseFile(path)
   except CatchableError as e:
-    echo "content: failed to parse " & path & " — " & e.msg
+    logError("content: failed to parse " & path & " — " & e.msg)
     result = newJNull()
 
 
@@ -327,7 +328,7 @@ proc loadContent*(contentDir: string) =
   loadQuests(contentDir)
   loadWorldDef(contentDir)
   loadAssetIndex(contentDir)
-  echo "content: loaded " &
+  logInfo("content: loaded " &
     $items.len & " items, " &
     $spells.len & " spells, " &
     $effects.len & " effects, " &
@@ -338,64 +339,64 @@ proc loadContent*(contentDir: string) =
     $shops.len & " shops, " &
     $aiPackages.len & " ai packages, " &
     $quests.len & " quests, " &
-    $worldDef.tiles.len & " world tiles"
+    $worldDef.tiles.len & " world tiles")
 
 proc getItem*(id: string): ItemDef =
   if id in items: items[id]
   else:
-    echo "content: item not found: " & id
+    logWarn("content: item not found: " & id)
     ItemDef(id: id)
 
 proc getSpell*(id: string): SpellDef =
   if id in spells: spells[id]
   else:
-    echo "content: spell not found: " & id
+    logWarn("content: spell not found: " & id)
     SpellDef(id: id)
 
 proc getEffect*(id: string): EffectDef =
   if id in effects: effects[id]
   else:
-    echo "content: effect not found: " & id
+    logWarn("content: effect not found: " & id)
     EffectDef(id: id)
 
 proc getNpc*(id: string): NpcDef =
   if id in npcs: npcs[id]
   else:
-    echo "content: npc not found: " & id
+    logWarn("content: npc not found: " & id)
     NpcDef(id: id)
 
 proc getRoom*(id: string): RoomDef =
   if id in rooms: rooms[id]
   else:
-    echo "content: room not found: " & id
+    logWarn("content: room not found: " & id)
     RoomDef(id: id)
 
 proc getTileDef*(id: string): TileDef =
   if id in tilesDefs: tilesDefs[id]
   else:
-    echo "content: tile def not found: " & id
+    logWarn("content: tile def not found: " & id)
     TileDef(id: id)
 
 proc getArmorPlate*(id: string): ArmorPlateDef =
   if id in armorPlates: armorPlates[id]
   else:
-    echo "content: armor plate not found: " & id
+    logWarn("content: armor plate not found: " & id)
     ArmorPlateDef(id: id)
 
 proc getShop*(id: string): ShopDef =
   if id in shops: shops[id]
   else:
-    echo "content: shop not found: " & id
+    logWarn("content: shop not found: " & id)
     ShopDef(id: id)
 
 proc getAiPackage*(id: string): AiPackageDef =
   if id in aiPackages: aiPackages[id]
   else:
-    echo "content: ai package not found: " & id
+    logWarn("content: ai package not found: " & id)
     AiPackageDef(id: id)
 
 proc getQuest*(id: string): QuestDef =
   if id in quests: quests[id]
   else:
-    echo "content: quest not found: " & id
+    logWarn("content: quest not found: " & id)
     QuestDef(id: id)

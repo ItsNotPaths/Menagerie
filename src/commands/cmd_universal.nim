@@ -55,7 +55,7 @@ proc cmdSleep(state: var GameState; args: seq[string]): CmdResult =
   if room.id == "" or room.raw == nil or room.raw{"type"}.getStr != "rest":
     return err("You can't sleep here.")
   if args.len == 0:
-    return ok("Sleep for how many hours?")
+    return CmdResult(lines: @["Sleep for how many hours?"], prefill: "sleep ")
   var hours = 0
   try:
     hours = parseInt(args[0])

@@ -3,6 +3,7 @@ import sdl2/ttf
 import sdl2/image
 import strutils, unicode, math
 import ipc
+import ../engine/log
 
 # ─── Palette ────────────────────────────────────────────────────────────────
 const
@@ -129,7 +130,7 @@ type
 # ─── SDL helpers ─────────────────────────────────────────────────────────────
 template sdlCheck(call: untyped) =
   if not call:
-    echo "SDL error: ", getError()
+    logError("SDL error: " & $getError())
     quit(1)
 
 proc setColor(ren: RendererPtr; c: tuple[r,g,b,a: uint8]) =
@@ -405,7 +406,7 @@ proc loadBgImage(app: var App; path: string) =
     app.bgTex = nil
   let surf = image.load(path.cstring)
   if surf.isNil:
-    echo "Image load failed: ", path, " — ", getError()
+    logError("Image load failed: " & path & " — " & $getError())
     return
   app.bgW = surf.w.int
   app.bgH = surf.h.int
@@ -635,6 +636,10 @@ proc main*() =
       of umRenderSprites: discard
       of umJournalOpen:
         app.openJournalOverlay(msg.jPages, msg.jIdx)
+      of umPrefill:
+        app.inputText   = msg.prefillText
+        app.inputCursor = msg.prefillText.len
+        app.inputScroll = 0
       of umQuit:
         running = false
     if dirtyBuf:

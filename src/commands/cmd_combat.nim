@@ -128,13 +128,22 @@ proc cmdCast(state: var GameState; args: seq[string]): CmdResult =
   # Row not yet given — prompt
   if row < 0:
     if mode in ["smite", "trap"]:
-      return ok(&"{mode.capitalizeAscii} — row and distance? (e.g. '3 2')")
+      return CmdResult(
+        lines:   @[&"{mode.capitalizeAscii} — row and distance? (e.g. 'cast {mode} {spellId} 3 2')"],
+        prefill: &"cast {mode} {spellId} ",
+      )
     else:
-      return ok(&"{mode.capitalizeAscii} — which row? (e.g. '5')")
+      return CmdResult(
+        lines:   @[&"{mode.capitalizeAscii} — which row? (e.g. 'cast {mode} {spellId} 5')"],
+        prefill: &"cast {mode} {spellId} ",
+      )
 
   # dist required for smite/trap but not given
   if mode in ["smite", "trap"] and dist < 0:
-    return ok(&"{mode.capitalizeAscii} at row {row} — distance? (e.g. '{row} 2')")
+    return CmdResult(
+      lines:   @[&"{mode.capitalizeAscii} at row {row} — distance? (e.g. 'cast {mode} {spellId} {row} 2')"],
+      prefill: &"cast {mode} {spellId} {row} ",
+    )
 
   let distOpt = if dist >= 0: some(dist) else: none(int)
   ok(doCast(state, mode, spellId, row, distOpt))
