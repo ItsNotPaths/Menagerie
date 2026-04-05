@@ -6,7 +6,8 @@
 
 import sdl2
 import sdl2/ttf
-import std/[strutils, tables, sequtils, algorithm, os]
+import sdl2/image as sdlImg
+import std/[strutils, tables, sequtils, algorithm, os, times]
 import plugin_db, asset_vfs
 import "../theme"
 
@@ -16,6 +17,9 @@ const
   SIDE_W       = 200
   TREE_PCT     = 60
   UPDATE_BTN_W = 140
+
+  SOUND_ICON_DATA*  = staticRead("baked-assets/soundasset_fixed_monochrome.png")
+  SCRIPT_ICON_DATA* = staticRead("baked-assets/scriptasset_fixed_monochrome.png")
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -56,6 +60,14 @@ type
 
     # hit-test buttons (rebuilt each render)
     btnUp, btnDown, btnToggle, btnUpdateVFS, btnExportAll: ABtn
+
+    # image preview texture (lazy-loaded, owned by tab)
+    previewTex:   TexturePtr
+    previewTexBn: string   ## basename currently loaded in previewTex
+
+    # baked icon textures (loaded once on first render, never freed)
+    soundIconTex:  TexturePtr
+    scriptIconTex: TexturePtr
 
     # layout cache (rebuilt each render, read in handleClick/handleScroll)
     sideListX, sideListY, sideListW, sideListH: int
@@ -146,6 +158,30 @@ proc buildTreeRows(tab: AssetsTab): seq[TreeRow] =
         basename:     bn,
         isWinning:    winning,
         overriddenBy: if winning: "" else: entry.winning.pluginName)
+
+# ── Helpers ───────────────────────────────────────────────────────────────────
+
+proc texFromMem(ren: RendererPtr; data: string): TexturePtr =
+  let rw   = rwFromConstMem(data.cstring, data.len.cint)
+  let surf = sdlImg.loadRW(rw, 0)
+  freeRW(rw)
+  if surf == nil: return nil
+  result = ren.createTextureFromSurface(surf)
+  freeSurface(surf)
+
+proc iconTexFromMem(ren: RendererPtr; data: string): TexturePtr =
+  ## Like texFromMem but makes black transparent and tints white to parchment,
+  ## so the icon composites cleanly over any background.
+  let rw   = rwFromConstMem(data.cstring, data.len.cint)
+  let surf = sdlImg.loadRW(rw, 0)
+  freeRW(rw)
+  if surf == nil: return nil
+  discard surf.setColorKey(1.cint, surf.format.mapRGB(0, 0, 0))
+  result = ren.createTextureFromSurface(surf)
+  freeSurface(surf)
+  if result == nil: return nil
+  discard result.setTextureColorMod(FG_ACTIVE.r, FG_ACTIVE.g, FG_ACTIVE.b)
+  discard result.setTextureBlendMode(BlendMode_Blend)
 
 # ── Render ────────────────────────────────────────────────────────────────────
 
@@ -349,7 +385,70 @@ proc render*(tab: var AssetsTab; ren: RendererPtr; font: FontPtr; fontH: int;
     while fp.len > 4 and font.textWidth(fp) > maxW:
       fp = "..." & fp[fp.len div 3 .. ^1]
     ren.renderText(font, fp, px, py, FG_DIM)
+    py += fontH + 12
+
+    # ── Last modified date ────────────────────────────────────────────────
+    try:
+      let mtime = getLastModificationTime(entry.winning.fullPath)
+      let mstr  = format(mtime.local, "yyyy-MM-dd  HH:mm")
+      ren.renderText(font, "Modified:", px, py, FG_DIM)
+      py += fontH + 4
+      ren.renderText(font, mstr, px, py, FG)
+      py += fontH + 12
+    except OSError:
+      discard
+
+    # ── Thumbnail / icon anchored to panel bottom (16:9, full panel width) ──
+    let thumbW = previewW - PAD * 2
+    let thumbH = thumbW * 9 div 16
+    let thumbY = treeAreaY + treeAreaH - PAD - thumbH
+    var thumbDst = sdl2.rect(px.cint, thumbY.cint, thumbW.cint, thumbH.cint)
+    ren.fillRect(px, thumbY, thumbW, thumbH, BG)
+
+    case entry.kind
+    of akImage:
+      if tab.previewTexBn != tab.selBasename:
+        if tab.previewTex != nil:
+          destroyTexture(tab.previewTex)
+          tab.previewTex = nil
+        tab.previewTexBn = tab.selBasename
+        let surf = sdlImg.load(entry.winning.fullPath.cstring)
+        if surf != nil:
+          tab.previewTex = ren.createTextureFromSurface(surf)
+          freeSurface(surf)
+      if tab.previewTex != nil:
+        discard ren.copy(tab.previewTex, nil, thumbDst.addr)
+
+    of akSound:
+      if tab.soundIconTex == nil:
+        tab.soundIconTex = ren.iconTexFromMem(SOUND_ICON_DATA)
+      if tab.soundIconTex != nil:
+        var iw, ih: cint
+        queryTexture(tab.soundIconTex, nil, nil, iw.addr, ih.addr)
+        let ix = px + (thumbW - iw.int) div 2
+        let iy = thumbY + (thumbH - ih.int) div 2
+        var idst = sdl2.rect(ix.cint, iy.cint, iw, ih)
+        discard ren.copy(tab.soundIconTex, nil, idst.addr)
+
+    of akScript:
+      if tab.scriptIconTex == nil:
+        tab.scriptIconTex = ren.iconTexFromMem(SCRIPT_ICON_DATA)
+      if tab.scriptIconTex != nil:
+        var iw, ih: cint
+        queryTexture(tab.scriptIconTex, nil, nil, iw.addr, ih.addr)
+        let ix = px + (thumbW - iw.int) div 2
+        let iy = thumbY + (thumbH - ih.int) div 2
+        var idst = sdl2.rect(ix.cint, iy.cint, iw, ih)
+        discard ren.copy(tab.scriptIconTex, nil, idst.addr)
+
+    of akOther:
+      discard
   else:
+    # Selection cleared — free any cached texture
+    if tab.previewTex != nil:
+      destroyTexture(tab.previewTex)
+      tab.previewTex   = nil
+      tab.previewTexBn = ""
     let hint = if tab.selPluginIdx < 0: "Select a plugin"
                else: "Select a file"
     ren.renderText(font, hint, px, py, FG_DIM)
