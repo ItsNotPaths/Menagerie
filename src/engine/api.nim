@@ -31,6 +31,10 @@
 ##   journal_write <page> <text...>               overwrite journal page N (1-indexed)
 ##   journal_append <text...>                     append line to last journal page
 ##   pause                                        injects __PAUSE__ sentinel
+##   open_dialogue <npc_id>                       start dialogue with an NPC
+##   open_shop     <shop_id>                      open a shop by id
+##   buy           <item_id>                      buy from the active shop
+##   sell          <item_id>                      sell an item from inventory
 
 import std/[json, options, strformat, strutils, sequtils, tables]
 import state, content, items, api_types, scripting
@@ -38,6 +42,8 @@ import conditions as cond
 import armor      as armormod
 import modifiers  as mods
 import skills     as sk
+import dialogue   as dlg
+import economy    as econ
 
 const COMBAT_PAUSE* = "__PAUSE__"
 
@@ -435,6 +441,26 @@ proc runCommand*(state: var GameState; cmd: string;
     try: amount = parseInt(parts[3])
     except: return
     sk.trainSkill(state, parts[2].toLowerAscii, amount)
+
+  of "open_dialogue":
+    # open_dialogue <npc_id>
+    if parts.len < 2: return
+    return dlg.openDialogue(state, parts[1])
+
+  of "open_shop":
+    # open_shop <shop_id>
+    if parts.len < 2: return
+    return econ.openShop(state, parts[1])
+
+  of "buy":
+    # buy <item_id>
+    if parts.len < 2: return
+    return econ.buyTrade(state, parts[1])
+
+  of "sell":
+    # sell <item_id>
+    if parts.len < 2: return
+    return econ.sellItem(state, parts[1])
 
   of "cast", "cast_spell":
     # Fire a spell inline from a content proc (armor proc, effect command, etc.).

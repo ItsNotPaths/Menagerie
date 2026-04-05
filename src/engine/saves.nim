@@ -369,7 +369,8 @@ proc catchupNpcStates*(state: var GameState): bool =
       result = true
 
 
-# ── Public API ────────────────────────────────────────────────────────────────
+# ── Engine Interface ─────────────────────────────────────────────────────────
+# Called by game_loop / cmd_menu only. Not Lua-callable.
 
 proc clearWorkingOnLaunch*() =
   ## Clear the working directory at startup. Any leftover content is discarded,

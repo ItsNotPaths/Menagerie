@@ -54,7 +54,9 @@ proc topicLines(npcRaw: JsonNode; variables: Table[string, JsonNode];
     result.add &"  [[{disp}:say {npcId} {tid}]]"
 
 
-# ── Public API ────────────────────────────────────────────────────────────────
+# ── Engine API ────────────────────────────────────────────────────────────────
+# openDialogue: also wired as api.nim verb "open_dialogue <npc_id>" (Lua-callable).
+# selectTopic: engine-only — driven by player link clicks via cmd_dialogue.nim.
 
 proc openDialogue*(state: var GameState; npcId: string): seq[string] =
   ## Print greeting and visible topic links. No session state set.

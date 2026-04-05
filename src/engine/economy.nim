@@ -67,7 +67,8 @@ proc adjustedCost(state: var GameState; itemId: string; baseCost: int): int =
   baseCost
 
 
-# ── Public API ────────────────────────────────────────────────────────────────
+# ── Script API ────────────────────────────────────────────────────────────────
+# All procs here are wired as api.nim verbs and are Lua-callable.
 
 proc shopLines*(state: GameState): seq[string] =
   ## Top-level shop view: category links + player sell panel.

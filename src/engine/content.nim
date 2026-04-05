@@ -337,7 +337,8 @@ proc loadAssetIndex(dir: string) =
     for k, v in d["scripts"]: assetIndex.scripts[k] = v.getStr
 
 
-# ── Public API ────────────────────────────────────────────────────────────────
+# ── Startup ───────────────────────────────────────────────────────────────────
+# loadContent: called once from game_loop at launch. Never Lua-callable.
 
 proc loadContent*(contentDir: string) =
   ## Load all content from contentDir at startup. Call once before game loop.
@@ -367,6 +368,11 @@ proc loadContent*(contentDir: string) =
     $aiPackages.len & " ai packages, " &
     $quests.len & " quests, " &
     $worldDef.tiles.len & " world tiles")
+
+
+# ── Engine API (content getters) ─────────────────────────────────────────────
+# Read-only lookups used by other engine modules. Not currently Lua-callable
+# but safe to expose if a use case arises.
 
 proc getItem*(id: string): ItemDef =
   if id in items: items[id]
