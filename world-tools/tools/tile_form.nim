@@ -11,7 +11,7 @@ import world_data
 
 const
   FORM_W    = 480
-  FORM_H    = 416   ## +26 for image row
+  FORM_H    = 452
   LABEL_W   = 112
   SWATCH_SZ = 14
   ROOM_ROWS = 4
@@ -24,16 +24,19 @@ type
     connections*: seq[string]
 
   TileEntry* = object
-    x*, y*:       int
-    tile*:        string
-    `type`*:      string
-    image*:       string
-    entry_room*:  string
-    rooms*:       seq[RoomRef]
-    global_npcs*: seq[string]
-    deleted*:     bool
+    x*, y*:           int
+    tile*:            string
+    `type`*:          string
+    image*:           string
+    entry_room*:      string
+    rooms*:           seq[RoomRef]
+    global_npcs*:     seq[string]
+    encounter_chance*: int          ## 0-100
+    encounter_tags*:  seq[string]
+    deleted*:         bool
 
-  TileField = enum tfNone, tfTile, tfEntryRoom, tfRoom, tfNpcAdd, tfImageFilter
+  TileField = enum tfNone, tfTile, tfEntryRoom, tfRoom, tfNpcAdd, tfImageFilter,
+                   tfEncounterChance, tfEncTagAdd
 
   TileForm* = object
     open*:         bool
@@ -69,24 +72,34 @@ type
     npcBuf:     string
     npcCursor:  int
 
+    encChanceBuf:    string
+    encChanceCursor: int
+    encTags:         seq[string]
+    encTagAddMode:   bool
+    encTagBuf:       string
+    encTagCursor:    int
+
     activeField: TileField
 
     # Layout cache (rebuilt each render)
-    formX, formY: int
-    tileFldR:     Rect
-    imgFldR:      Rect
-    imgDropR:     Rect
-    entryFldR:    Rect
-    typeBtnR:     Rect
-    typeOptR:     array[4, Rect]
-    roomRowR:     seq[Rect]
-    btnAddRoom:   Rect
-    btnDelRoom:   Rect
-    npcChipXR:    seq[Rect]    ## chip × rects, one per tag
-    btnAddNpc:    Rect
-    btnSave:      Rect
-    btnCancel:    Rect
-    btnCopy:      Rect
+    formX, formY:  int
+    tileFldR:      Rect
+    imgFldR:       Rect
+    imgDropR:      Rect
+    entryFldR:     Rect
+    typeBtnR:      Rect
+    typeOptR:      array[4, Rect]
+    roomRowR:      seq[Rect]
+    btnAddRoom:    Rect
+    btnDelRoom:    Rect
+    npcChipXR:     seq[Rect]    ## chip × rects, one per tag
+    btnAddNpc:     Rect
+    encFldR:       Rect
+    encTagChipXR:  seq[Rect]
+    btnAddEncTag:  Rect
+    btnSave:       Rect
+    btnCancel:     Rect
+    btnCopy:       Rect
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -119,14 +132,18 @@ proc buildImgFiltered(form: var TileForm) =
         form.imgFiltered.add f
 
 proc packResult(form: TileForm): TileEntry =
-  result.x           = form.tileX
-  result.y           = form.tileY
-  result.tile        = form.tileBuf.strip()
-  result.`type`      = TILE_TYPES[form.selType]
-  result.image       = form.imgFilterBuf.strip()
-  result.entry_room  = form.entryBuf.strip()
-  result.rooms       = form.roomLines.filterIt(it.strip().len > 0).mapIt(lineToRoom(it))
-  result.global_npcs = form.npcTags
+  result.x               = form.tileX
+  result.y               = form.tileY
+  result.tile            = form.tileBuf.strip()
+  result.`type`          = TILE_TYPES[form.selType]
+  result.image           = form.imgFilterBuf.strip()
+  result.entry_room      = form.entryBuf.strip()
+  result.rooms           = form.roomLines.filterIt(it.strip().len > 0).mapIt(lineToRoom(it))
+  result.global_npcs     = form.npcTags
+  result.encounter_chance =
+    try: min(100, max(0, parseInt(form.encChanceBuf.strip())))
+    except ValueError: 0
+  result.encounter_tags  = form.encTags
 
 # ── Open / Close ──────────────────────────────────────────────────────────────
 
@@ -156,13 +173,20 @@ proc openFor*(form: var TileForm; entry: TileEntry; isForeign: bool;
   form.selRoom      = -1
   form.editRoom     = -1
   form.roomScrollY  = 0
-  form.npcTags      = entry.global_npcs
-  form.npcAddMode   = false
-  form.npcBuf       = ""
-  form.npcCursor    = 0
-  form.activeField  = if isForeign: tfNone else: tfTile
-  form.roomRowR     = @[]
-  form.npcChipXR    = @[]
+  form.npcTags         = entry.global_npcs
+  form.npcAddMode      = false
+  form.npcBuf          = ""
+  form.npcCursor       = 0
+  form.encChanceBuf    = if entry.encounter_chance > 0: $entry.encounter_chance else: ""
+  form.encChanceCursor = form.encChanceBuf.len
+  form.encTags         = entry.encounter_tags
+  form.encTagAddMode   = false
+  form.encTagBuf       = ""
+  form.encTagCursor    = 0
+  form.activeField     = if isForeign: tfNone else: tfTile
+  form.roomRowR        = @[]
+  form.npcChipXR       = @[]
+  form.encTagChipXR    = @[]
 
 proc doClose*(form: var TileForm) =
   form.open         = false
@@ -340,6 +364,60 @@ proc render*(form: var TileForm; ren: RendererPtr; font: FontPtr; fontH: int;
       ren.fillRect(chipX, curY, 60, ROW_H, if addNpcHot: BTN_HOV else: BTN_BG)
       renderText(ren, font, "+ Add", chipX + 4, curY + (ROW_H - fontH) div 2 - 2, FG_OK)
 
+  curY += ROW_H + 6
+
+  # ── Encounter chance ──────────────────────────────────────────────────────────
+  renderText(ren, font, "Enc. Chance %:",
+             fx + PAD, curY + (ROW_H - fontH) div 2 - 2, FG_DIM)
+  ren.fillRect(fieldX, curY, fieldW, ROW_H, BG)
+  ren.drawRect(fieldX, curY, fieldW, ROW_H,
+               if form.activeField == tfEncounterChance and editable: FG_DIM else: BG3)
+  renderText(ren, font, form.encChanceBuf,
+             fieldX + 4, curY + (ROW_H - fontH) div 2 - 2,
+             if editable: FG else: FG_DIM)
+  if form.activeField == tfEncounterChance and editable and showCaret:
+    let cx = fieldX + 4 + textWidth(font, form.encChanceBuf[0 ..< form.encChanceCursor])
+    ren.drawVLine(cx, curY + 3, ROW_H - 6, FG_ACTIVE)
+  form.encFldR = (fieldX.cint, curY.cint, fieldW.cint, ROW_H.cint)
+  curY += ROW_H + 6
+
+  # ── Encounter tags ────────────────────────────────────────────────────────────
+  renderText(ren, font, "Enc. Tags:", fx + PAD, curY, FG_DIM)
+  curY += fontH + 4
+
+  form.encTagChipXR.setLen(0)
+  var encChipX = listX
+  for i, tag in form.encTags:
+    let xBtnW = if editable: ROW_H else: 0
+    let tw    = textWidth(font, tag) + 8 + xBtnW
+    ren.fillRect(encChipX, curY, tw, ROW_H, BG3)
+    renderText(ren, font, tag, encChipX + 4, curY + (ROW_H - fontH) div 2 - 2, FG)
+    if editable:
+      let xr: Rect = ((encChipX + tw - ROW_H).cint, curY.cint, ROW_H.cint, ROW_H.cint)
+      form.encTagChipXR.add xr
+      renderText(ren, font, "x",
+                 xr.x.int + (ROW_H - textWidth(font, "×")) div 2,
+                 curY + (ROW_H - fontH) div 2 - 2, FG_DEL)
+    else:
+      form.encTagChipXR.add (0.cint, 0.cint, 0.cint, 0.cint)
+    encChipX += tw + 4
+    if encChipX > fx + FORM_W - PAD - 80: break
+
+  if editable:
+    if form.encTagAddMode:
+      ren.fillRect(encChipX, curY, 120, ROW_H, BG)
+      ren.drawRect(encChipX, curY, 120, ROW_H, BG3)
+      renderText(ren, font, form.encTagBuf,
+                 encChipX + 4, curY + (ROW_H - fontH) div 2 - 2, FG)
+      if form.activeField == tfEncTagAdd and showCaret:
+        let cx = encChipX + 4 + textWidth(font, form.encTagBuf[0 ..< form.encTagCursor])
+        ren.drawVLine(cx, curY + 3, ROW_H - 6, FG_ACTIVE)
+    else:
+      form.btnAddEncTag = (encChipX.cint, curY.cint, 60.cint, ROW_H.cint)
+      let addEncTagHot  = form.btnAddEncTag.inRect(mx, my)
+      ren.fillRect(encChipX, curY, 60, ROW_H, if addEncTagHot: BTN_HOV else: BTN_BG)
+      renderText(ren, font, "+ Add", encChipX + 4, curY + (ROW_H - fontH) div 2 - 2, FG_OK)
+
   # ── Footer buttons ────────────────────────────────────────────────────────────
   let footY = fy + FORM_H - BTN_H - PAD
   if form.isForeign:
@@ -512,6 +590,25 @@ proc handleMouseDown*(form: var TileForm; x, y, btn: int) =
       form.activeField = tfNpcAdd
       return
 
+  # Encounter chance field
+  if form.encFldR.inRect(x, y) and editable:
+    form.activeField    = tfEncounterChance
+    return
+
+  # Enc tag chip × buttons
+  if editable:
+    for i, xr in form.encTagChipXR:
+      if xr.w > 0 and xr.inRect(x, y) and i < form.encTags.len:
+        form.encTags.delete(i)
+        form.encTagChipXR.setLen(0)
+        return
+    if not form.encTagAddMode and form.btnAddEncTag.inRect(x, y):
+      form.encTagAddMode  = true
+      form.encTagBuf      = ""
+      form.encTagCursor   = 0
+      form.activeField    = tfEncTagAdd
+      return
+
   # Footer
   if form.isForeign:
     if form.btnCopy.inRect(x, y):
@@ -577,6 +674,17 @@ proc handleTextInput*(form: var TileForm; text: string) =
   of tfNpcAdd:
     form.npcBuf.insert(text, form.npcCursor)
     form.npcCursor += text.len
+  of tfEncounterChance:
+    for ch in text:
+      if ch in {'0'..'9'}:
+        form.encChanceBuf.insert($ch, form.encChanceCursor)
+        inc form.encChanceCursor
+    if form.encChanceBuf.len > 3:
+      form.encChanceBuf    = form.encChanceBuf[0 ..< 3]
+      form.encChanceCursor = min(form.encChanceCursor, 3)
+  of tfEncTagAdd:
+    form.encTagBuf.insert(text, form.encTagCursor)
+    form.encTagCursor += text.len
   of tfNone: discard
 
 proc handleKeyDown*(form: var TileForm; sym: Scancode; ctrl, shift: bool) =
@@ -595,6 +703,9 @@ proc handleKeyDown*(form: var TileForm; sym: Scancode; ctrl, shift: bool) =
     elif form.npcAddMode:
       form.npcAddMode  = false
       form.activeField = tfNone
+    elif form.encTagAddMode:
+      form.encTagAddMode  = false
+      form.activeField    = tfNone
     else:
       form.wasCancelled = true
       form.doClose()
@@ -660,4 +771,20 @@ proc handleKeyDown*(form: var TileForm; sym: Scancode; ctrl, shift: bool) =
       form.activeField = tfNone
     else:
       navField(form.npcBuf, form.npcCursor)
+  of tfEncounterChance:
+    case sym
+    of SDL_SCANCODE_RETURN, SDL_SCANCODE_KP_ENTER:
+      form.activeField = tfNone
+    else:
+      navField(form.encChanceBuf, form.encChanceCursor)
+  of tfEncTagAdd:
+    case sym
+    of SDL_SCANCODE_RETURN, SDL_SCANCODE_KP_ENTER:
+      let tag = form.encTagBuf.strip()
+      if tag.len > 0: form.encTags.add tag
+      form.encTagAddMode  = false
+      form.encTagBuf      = ""
+      form.activeField    = tfNone
+    else:
+      navField(form.encTagBuf, form.encTagCursor)
   of tfNone: discard

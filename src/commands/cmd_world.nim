@@ -3,7 +3,8 @@
 ## World-map commands: go, look, survey, travel, peek, enter.
 ## Call initCmdWorld() from game_loop to register handlers.
 
-import std/[json, sequtils, strformat, strutils, tables]
+import std/[json, os, sequtils, strformat, strutils, tables]
+import sdl2, sdl2/image as sdl2img
 import engine/state
 import engine/world
 import engine/items
@@ -36,15 +37,92 @@ proc cmdGo(state: var GameState; args: seq[string]): CmdResult =
   let nx = x + dx; let ny = y + dy
   let ticks = movementTicks(state, nx, ny)
   state.player.position = (nx, ny)
+
+  let encLines = checkEncounter(state, nx, ny)
+  if encLines.len > 0:
+    result = okTicks(ticks, @[&"You head {dir}.", ""] & encLines)
+    result.imagePath = roomImagePath(state)
+    return
+
   let lines = @[&"You head {dir}."] & tileLines(state, nx, ny)
   result = okTicks(ticks, lines)
   result.imagePath = tileImagePath(state, nx, ny)
 
 
+# ── Survey image composite ───────────────────────────────────────────────────
+
+const surveyDirs = {
+  "north": (0,  1), "n": (0,  1),
+  "south": (0, -1), "s": (0, -1),
+  "east":  (1,  0), "e": (1,  0),
+  "west":  (-1, 0), "w": (-1, 0),
+}.toTable
+
+const surveyOutW = 3440
+const surveyOutH = 1440
+
+proc surveyComposite(state: GameState; dir: string): string =
+  ## Composite a horizon image for survey direction. Returns temp PNG path or "".
+  if dir notin surveyDirs: return ""
+  let (dx, dy) = surveyDirs[dir]
+  let (px, py) = state.player.position
+  let range    = surveyRange(state)
+
+  # Collect image paths nearest→farthest
+  var paths: seq[string]
+  for i in 1..range:
+    paths.add tileImagePath(state, px + dx * i, py + dy * i)
+  if paths.allIt(it == ""): return ""
+
+  # Equal-height strips — each tile gets the same slice height
+  let sh = surveyOutH div range
+
+  # Output surface in RGB24 — no alpha channel, avoids all blend mode complications
+  let outSurf = createRGBSurface(surveyOutW.int32, surveyOutH.int32, 24)
+  if outSurf.isNil: return ""
+  defer: freeSurface(outSurf)
+  discard fillRect(outSurf, nil, mapRGB(outSurf.format, 17, 17, 17))
+
+  var yCursor = surveyOutH  # fill bottom → top
+  for i in 0..<range:
+    yCursor -= sh
+    let path = paths[i]
+    if path == "" or not fileExists(path): continue
+
+    let raw = sdl2img.load(path.cstring)
+    if raw.isNil: continue
+    # Convert to RGB24 — strips alpha, normalises pixel format, no scaling
+    let panel = convertSurfaceFormat(raw, SDL_PIXELFORMAT_RGB24, 0)
+    freeSurface(raw)
+    if panel.isNil: continue
+    defer: freeSurface(panel)
+
+    let iw = panel.w.int
+    let ih = panel.h.int
+
+    # Vertical crop: sh pixels from vertical centre of source image
+    let cropH   = min(sh, ih)
+    let srcTop  = (ih - cropH) div 2
+    # Horizontal crop: output width centred in source (black bars if source narrower)
+    let cropW   = min(surveyOutW, iw)
+    let srcLeft = (iw - cropW) div 2
+    let dstLeft = (surveyOutW - cropW) div 2
+
+    var srcR = rect(srcLeft.cint, srcTop.cint, cropW.cint, cropH.cint)
+    var dstR = rect(dstLeft.cint, yCursor.cint, cropW.cint, cropH.cint)
+    discard blitSurface(panel, srcR.addr, outSurf, dstR.addr)
+
+  let tmpPath = getTempDir() / "menagerie_survey.png"
+  if sdl2img.savePNG(outSurf, tmpPath.cstring) != 0: return ""
+  tmpPath
+
+
 proc cmdSurvey(state: var GameState; args: seq[string]): CmdResult =
   if args.len == 0:
     return err("Survey which direction? (north / south / east / west)")
-  result = okTicks(2, surveyLines(state, args[0]))
+  let dir = args[0].toLowerAscii
+  result = okTicks(2, surveyLines(state, dir))
+  result.imagePath = surveyComposite(state, dir)
 
 
 proc cmdPeekWorld(state: var GameState; args: seq[string]): CmdResult =
@@ -146,13 +224,20 @@ proc cmdTake(state: var GameState; args: seq[string]): CmdResult =
             panelLines: fresh, panelAppend: true)
 
 
+proc cmdFleeEncounter(state: var GameState; args: seq[string]): CmdResult =
+  if not state.variables.getOrDefault("_in_encounter", newJBool(false)).getBool:
+    return err("You are not in an encounter.")
+  result = okTicks(2, @["You flee from the encounter."] & leaveEncounterRoom(state))
+
+
 proc initCmdWorld*() =
-  register("look",   ctxWorld, cmdLook)
-  register("go",     ctxWorld, cmdGo)
-  register("move",   ctxWorld, cmdGo)
-  register("survey", ctxWorld, cmdSurvey)
-  register("peek",   ctxWorld, cmdPeekWorld)
-  register("enter",  ctxWorld, cmdEnter)
-  register("travel", ctxWorld, cmdTravel)
+  register("look",            ctxWorld,   cmdLook)
+  register("go",              ctxWorld,   cmdGo)
+  register("move",            ctxWorld,   cmdGo)
+  register("survey",          ctxWorld,   cmdSurvey)
+  register("peek",            ctxWorld,   cmdPeekWorld)
+  register("enter",           ctxWorld,   cmdEnter)
+  register("travel",          ctxWorld,   cmdTravel)
+  register("flee_encounter",  ctxDungeon, cmdFleeEncounter)
   registerAny("scavenge", cmdScavenge, hidden = true)
   registerAny("take",     cmdTake,     hidden = true)

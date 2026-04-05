@@ -75,14 +75,21 @@ type
     id*, displayName*: string
     raw*:              JsonNode   ## actions array
 
+  EncounterDef* = object
+    id*, name*, description*, image*, encType*: string
+    tags*: seq[string]
+    raw*:  JsonNode   ## enemies array, etc.
+
   WorldTile* = object
-    x*, y*:       int
-    tileType*:    string   ## "town" | "road" | "dungeon" | "crossroads" | "ruin" | terrain
-    name*:        string   ## named location name; "" for anonymous tiles
-    tile*:        string   ## tile def id for locations; "" for plain terrain
-    description*: string   ## custom description override
-    image*:       string   ## custom image filename override
-    deleted*:     bool     ## soft-deleted in world_def export — skip on load
+    x*, y*:            int
+    tileType*:         string   ## "town" | "road" | "dungeon" | "crossroads" | "ruin" | terrain
+    name*:             string   ## named location name; "" for anonymous tiles
+    tile*:             string   ## tile def id for locations; "" for plain terrain
+    description*:      string   ## custom description override
+    image*:            string   ## custom image filename override
+    encounter_chance*: int      ## 0-100; 0 = no encounters
+    encounter_tags*:   seq[string]
+    deleted*:          bool     ## soft-deleted in world_def export — skip on load
 
   WorldDef* = object
     worldSeed*: int
@@ -96,18 +103,19 @@ type
 # ── Module-level content tables ───────────────────────────────────────────────
 
 var
-  items*:      Table[string, ItemDef]
-  spells*:     Table[string, SpellDef]
-  effects*:    Table[string, EffectDef]
-  npcs*:       Table[string, NpcDef]
-  rooms*:      Table[string, RoomDef]
-  tilesDefs*:  Table[string, TileDef]
+  items*:       Table[string, ItemDef]
+  spells*:      Table[string, SpellDef]
+  effects*:     Table[string, EffectDef]
+  npcs*:        Table[string, NpcDef]
+  rooms*:       Table[string, RoomDef]
+  encounters*:  Table[string, EncounterDef]
+  tilesDefs*:   Table[string, TileDef]
   armorPlates*: Table[string, ArmorPlateDef]
-  shops*:      Table[string, ShopDef]
-  aiPackages*: Table[string, AiPackageDef]
-  quests*:     Table[string, QuestDef]
-  worldDef*:   WorldDef
-  assetIndex*: AssetIndex
+  shops*:       Table[string, ShopDef]
+  aiPackages*:  Table[string, AiPackageDef]
+  quests*:      Table[string, QuestDef]
+  worldDef*:    WorldDef
+  assetIndex*:  AssetIndex
 
 
 # ── Internal helpers ──────────────────────────────────────────────────────────
@@ -225,6 +233,21 @@ proc loadRooms(dir: string) =
       raw:      d,
     )
 
+proc loadEncounters(dir: string) =
+  for f in walkFiles(dir / "encounters/*.json"):
+    let d = loadJson(f)
+    if d.kind != JObject: continue
+    let id = d{"id"}.getStr(f.splitFile.name)
+    encounters[id] = EncounterDef(
+      id:          id,
+      name:        d{"name"}.getStr(id),
+      description: d{"description"}.getStr,
+      image:       d{"image"}.getStr,
+      encType:     d{"type"}.getStr,
+      tags:        strSeq(d{"tags"}),
+      raw:         d,
+    )
+
 proc loadTiles(dir: string) =
   for f in walkFiles(dir / "tiles/*.json"):
     let d = loadJson(f)
@@ -291,14 +314,16 @@ proc loadWorldDef(dir: string) =
   if d.hasKey("tiles") and d["tiles"].kind == JArray:
     for t in d["tiles"]:
       worldDef.tiles.add WorldTile(
-        x:           t{"x"}.getInt(0),
-        y:           t{"y"}.getInt(0),
-        tileType:    t{"type"}.getStr,
-        name:        t{"name"}.getStr,
-        tile:        t{"tile"}.getStr,
-        description: t{"description"}.getStr,
-        image:       t{"image"}.getStr,
-        deleted:     t{"deleted"}.getBool(false),
+        x:                t{"x"}.getInt(0),
+        y:                t{"y"}.getInt(0),
+        tileType:         t{"type"}.getStr,
+        name:             t{"name"}.getStr,
+        tile:             t{"tile"}.getStr,
+        description:      t{"description"}.getStr,
+        image:            t{"image"}.getStr,
+        encounter_chance: t{"encounter_chance"}.getInt(0),
+        encounter_tags:   strSeq(t{"encounter_tags"}),
+        deleted:          t{"deleted"}.getBool(false),
       )
 
 proc loadAssetIndex(dir: string) =
@@ -321,6 +346,7 @@ proc loadContent*(contentDir: string) =
   loadEffects(contentDir)
   loadNpcs(contentDir)
   loadRooms(contentDir)
+  loadEncounters(contentDir)
   loadTiles(contentDir)
   loadArmorPlates(contentDir)
   loadShops(contentDir)
@@ -334,6 +360,7 @@ proc loadContent*(contentDir: string) =
     $effects.len & " effects, " &
     $npcs.len & " npcs, " &
     $rooms.len & " rooms, " &
+    $encounters.len & " encounters, " &
     $tilesDefs.len & " tile defs, " &
     $armorPlates.len & " armor plates, " &
     $shops.len & " shops, " &
@@ -370,6 +397,10 @@ proc getRoom*(id: string): RoomDef =
   else:
     logWarn("content: room not found: " & id)
     RoomDef(id: id)
+
+proc getEncounter*(id: string): EncounterDef =
+  if id in encounters: encounters[id]
+  else: EncounterDef()   ## silent — callers check enc.id != "" themselves
 
 proc getTileDef*(id: string): TileDef =
   if id in tilesDefs: tilesDefs[id]

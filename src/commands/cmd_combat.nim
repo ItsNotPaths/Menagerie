@@ -152,21 +152,33 @@ proc cmdCast(state: var GameState; args: seq[string]): CmdResult =
 # ── Auxiliary spatial spells ──────────────────────────────────────────────────
 
 proc cmdPush(state: var GameState; args: seq[string]): CmdResult =
+  if args.len == 0:
+    return CmdResult(lines: @["Push — which row?"], prefill: "push ")
   ok(doAuxSpell(state, "push", args))
 
 proc cmdPull(state: var GameState; args: seq[string]): CmdResult =
+  if args.len == 0:
+    return CmdResult(lines: @["Pull — which row?"], prefill: "pull ")
   ok(doAuxSpell(state, "pull", args))
 
 proc cmdScatter(state: var GameState; args: seq[string]): CmdResult =
+  if args.len == 0:
+    return CmdResult(lines: @["Scatter — which row?"], prefill: "scatter ")
   ok(doAuxSpell(state, "scatter", args))
 
 proc cmdPin(state: var GameState; args: seq[string]): CmdResult =
+  if args.len < 2:
+    return CmdResult(lines: @["Pin — row and distance? (e.g. 'pin 3 2')"], prefill: "pin " & args.join(" ") & (if args.len > 0: " " else: ""))
   ok(doAuxSpell(state, "pin", args))
 
 proc cmdSwap(state: var GameState; args: seq[string]): CmdResult =
+  if args.len < 4:
+    return CmdResult(lines: @["Swap — two positions: row1 dist1 row2 dist2 (e.g. 'swap 1 3 2 4')"], prefill: "swap " & args.join(" ") & (if args.len > 0: " " else: ""))
   ok(doAuxSpell(state, "swap", args))
 
 proc cmdBind(state: var GameState; args: seq[string]): CmdResult =
+  if args.len < 2:
+    return CmdResult(lines: @["Bind — two enemy IDs? (e.g. 'bind goblin orc')"], prefill: "bind " & args.join(" ") & (if args.len > 0: " " else: ""))
   ok(doAuxSpell(state, "bind", args))
 
 

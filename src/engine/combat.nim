@@ -539,7 +539,7 @@ proc endCombat*(state: var GameState): seq[string] =
   result &= mods.fireEvent(state, "combat_end", "")
   state.combat = none(CombatState)
 
-  if state.variables.getOrDefault("_in_encounter", newJNull()).getStr != "":
+  if state.variables.getOrDefault("_in_encounter", newJBool(false)).getBool:
     result.add "The fight is over."
     result &= world.leaveEncounterRoom(state)
     return
@@ -1050,7 +1050,7 @@ proc doFlee*(state: var GameState): seq[string] =
   let isTown = tile.tileType == "town"
   let fleeLn = mods.fireEvent(state, "flee", "player")
 
-  if state.variables.getOrDefault("_in_encounter", newJNull()).getStr != "":
+  if state.variables.getOrDefault("_in_encounter", newJBool(false)).getBool:
     state.combat = none(CombatState)
     result.add "You escape into the open road."
     result &= fleeLn

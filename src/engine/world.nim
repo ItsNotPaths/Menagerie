@@ -17,7 +17,9 @@ import engine/gameplay_vars
 
 # ── Terrain constants ─────────────────────────────────────────────────────────
 
-const surveyRange* = 5
+proc surveyRange*(state: GameState): int =
+  ## How many tiles out the player can survey. Mutable via variables["survey_range"].
+  state.variables.getOrDefault("survey_range", newJInt(5)).getInt.max(1)
 
 let terrainTicks = {
   "forest": 8, "plains": 4, "mountain": 16, "swamp": 12, "desert": 8,
@@ -184,9 +186,13 @@ proc tileImagePath*(state: GameState; x, y: int): string =
 
 
 proc roomImagePath*(state: GameState): string =
-  ## Return image path for the player's current room. "" if none.
+  ## Return image path for the player's current room (or active encounter). "" if none.
   let roomId = state.player.currentRoom
   if roomId == "": return ""
+  if state.variables.getOrDefault("_in_encounter", newJBool(false)).getBool:
+    let enc = content.getEncounter(roomId)
+    if enc.image == "": return ""
+    return resolveAsset(enc.image)
   let room = content.getRoom(roomId)
   if room.image == "": return ""
   resolveAsset(room.image)
@@ -434,11 +440,38 @@ proc tileLines*(state: GameState; x, y: int): seq[string] =
 
 # ── Room lines ────────────────────────────────────────────────────────────────
 
+proc encounterLines(state: GameState): seq[string] =
+  ## Description lines when the player is in a random encounter.
+  let encId = state.player.currentRoom
+  let enc   = content.getEncounter(encId)
+  if enc.id == "":
+    return @[&"(Encounter '{encId}' not found.)"]
+
+  result = @[enc.name, "-".repeat(40), enc.description]
+
+  let occupants = getNpcsInRoom(state)
+  let enemies   = occupants.filterIt(it.hostile)
+  if enemies.len > 0:
+    result.add ""
+    for (npcId, label, _) in enemies:
+      let loc    = state.npcStates.getOrDefault(npcId, newJNull())
+      let row    = if loc.kind == JObject: loc{"row"}.getInt(-1)      else: -1
+      let dist   = if loc.kind == JObject: loc{"distance"}.getInt(-1) else: -1
+      let posStr = if row >= 0 and dist >= 0: &"  row {row}  dist {dist}" else: ""
+      result.add &"  {label}{posStr}"
+
+  result.add ""
+  result.add "  [[fight:attack]]  [[run:flee_encounter]]"
+
+
 proc roomLines*(state: GameState): seq[string] =
   ## Description lines for the player's current room inside a location.
   let (x, y) = state.player.position
   let roomId = state.player.currentRoom
   if roomId == "": return @["(No location data.)"]
+
+  if state.variables.getOrDefault("_in_encounter", newJBool(false)).getBool:
+    return encounterLines(state)
 
   let room = content.getRoom(roomId)
   if room.id == "":
@@ -556,6 +589,68 @@ proc leaveEncounterRoom*(state: var GameState): seq[string] =
   tileLines(state, x, y)
 
 
+# ── Encounter triggering ──────────────────────────────────────────────────────
+
+proc pickEncounterForTags(tags: seq[string]): string =
+  ## Return a random encounter ID whose tag list overlaps with tags, "" if none.
+  var pool: seq[string]
+  for id, enc in content.encounters:
+    for t in enc.tags:
+      if t in tags:
+        pool.add id
+        break
+  if pool.len == 0: return ""
+  pool[rand(pool.high)]
+
+
+proc enterEncounter*(state: var GameState; encId: string): seq[string] =
+  ## Spawn encounter enemies, put player in encounter context, return room lines.
+  let enc = content.getEncounter(encId)
+  if enc.id == "": return @["(Encounter '" & encId & "' not found.)"]
+
+  state.player.currentRoom = enc.id
+  state.context = ctxDungeon
+  state.variables["_in_encounter"] = %true
+
+  let enemies = enc.raw{"enemies"}
+  if enemies != nil and enemies.kind == JArray:
+    for enemyNode in enemies:
+      let eId = enemyNode.getStr
+      if eId == "": continue
+      let counter = state.variables.getOrDefault("_npc_spawn_counter", newJInt(0)).getInt + 1
+      state.variables["_npc_spawn_counter"] = %counter
+      saves.flushVariables(state)
+      let instanceId = &"{eId}_{counter}"
+      let npc = content.getNpc(eId)
+      let baseHealth = if npc.id != "": npc.health else: 20.0
+      let (row, dist) = rollStartPosition(if npc.id != "": npc.raw else: nil)
+      state.npcStates[instanceId] = %*{
+        "tile":         "@encounter",
+        "room":         enc.id,
+        "alive":        true,
+        "health":       baseHealth,
+        "spawned_from": eId,
+        "row":          row,
+        "distance":     dist,
+      }
+
+  populateRoomQueue(state)
+  roomLines(state)
+
+
+proc checkEncounter*(state: var GameState; x, y: int): seq[string] =
+  ## Roll encounter chance for the hand-placed tile at (x, y).
+  ## Returns non-empty encounter lines if triggered; empty seq otherwise.
+  let wd = getWorldDefTile(x, y)
+  if wd.isNone: return
+  let tile = wd.get
+  if tile.encounter_chance <= 0 or tile.encounter_tags.len == 0: return
+  if rand(1..100) > tile.encounter_chance: return
+  let encId = pickEncounterForTags(tile.encounter_tags)
+  if encId == "": return
+  enterEncounter(state, encId)
+
+
 proc dropEntityLoot*(state: var GameState; entityId: string): seq[string] =
   ## Mark entity dead in npc_states and collect loot item IDs.
   ## Returns seq of item IDs (may contain duplicates for stacks).
@@ -637,8 +732,7 @@ proc peekLines*(state: GameState): seq[string] =
     return @["Nothing here to peer into."]
 
   let key = &"{x}_{y}"
-  let dirty = state.dirty.getOrDefault(key, newJNull())
-  let tileName = if dirty.kind == JObject: dirty{"tile"}.getStr else: ""
+  let tileName = tile.tileDef
   if tileName == "": return @["(Tile preset not configured.)"]
 
   let td = content.getTileDef(tileName)
@@ -653,17 +747,43 @@ proc peekLines*(state: GameState): seq[string] =
   var friendlyLines: seq[string]
   var enemyLines:    seq[string]
 
-  for npcId, loc in state.npcStates:
-    if loc.kind != JObject: continue
-    if not loc{"alive"}.getBool(true): continue
-    if loc.hasKey("spawned_from"):
-      if loc{"tile"}.getStr != key or loc{"room"}.getStr != td.entryRoom: continue
-      let baseId = loc{"spawned_from"}.getStr
-      let npc = content.getNpc(baseId)
-      let label = if npc.id != "": npc.displayName else: baseId
-      enemyLines.add &"  {label}"
-    else:
+  let visited = key in state.dirty
+
+  if visited:
+    # Tile has been visited — use npcStates for accurate alive tracking
+    for npcId, loc in state.npcStates:
+      if loc.kind != JObject: continue
+      if not loc{"alive"}.getBool(true): continue
+      if loc.hasKey("spawned_from"):
+        if loc{"tile"}.getStr != key or loc{"room"}.getStr != td.entryRoom: continue
+        let baseId = loc{"spawned_from"}.getStr
+        let npc = content.getNpc(baseId)
+        let label = if npc.id != "": npc.displayName else: baseId
+        enemyLines.add &"  {label}"
+      else:
+        if loc{"tile"}.getStr != tileName: continue
+        let npc = content.getNpc(npcId)
+        if npc.id == "": continue
+        if getNpcRoom(npc.raw, tileName, state.player.tick, td.entryRoom) != td.entryRoom: continue
+        let label = npc.displayName
+        if npc.isHostile: enemyLines.add &"  {label}"
+        else: friendlyLines.add &"  {label}"
+  else:
+    # Not yet visited — read enemies directly from the room definition
+    let enemies = room.raw{"enemies"}
+    if enemies != nil and enemies.kind == JArray:
+      for e in enemies:
+        let eId = e.getStr
+        if eId == "": continue
+        let npc = content.getNpc(eId)
+        let label = if npc.id != "": npc.displayName else: eId
+        enemyLines.add &"  {label}"
+    # Named NPCs scheduled to the entry room
+    for npcId, loc in state.npcStates:
+      if loc.kind != JObject: continue
+      if loc.hasKey("spawned_from"): continue
       if loc{"tile"}.getStr != tileName: continue
+      if not loc{"alive"}.getBool(true): continue
       let npc = content.getNpc(npcId)
       if npc.id == "": continue
       if getNpcRoom(npc.raw, tileName, state.player.tick, td.entryRoom) != td.entryRoom: continue
@@ -677,7 +797,7 @@ proc peekLines*(state: GameState): seq[string] =
   if enemyLines.len > 0:
     result.add ""
     result.add enemyLines
-  if enemyLines.len == 0:
+  if friendlyLines.len == 0 and enemyLines.len == 0:
     result.add ""
     result.add "The area looks clear."
 
@@ -745,8 +865,9 @@ proc surveyLines*(state: GameState; direction: string): seq[string] =
   let (dx, dy) = dirs[dir]
   let long = longDir.getOrDefault(dir, dir)
   let (x, y) = state.player.position
+  let range = surveyRange(state)
   result = @[&"You survey to the {long}."]
-  for i in 1..surveyRange:
+  for i in 1..range:
     let tx = x + dx * i; let ty = y + dy * i
     let tile = getTile(state, tx, ty)
     let name = if tile.name != "": tile.name else: tile.tileType
@@ -808,6 +929,15 @@ proc travelRoad*(state: var GameState; direction: string; steps: int): (seq[stri
     lines.add tileLines(state, curX, curY)
     return (lines, totalTicks)
 
+  let firstEncLines = checkEncounter(state, curX, curY)
+  if firstEncLines.len > 0:
+    lines.add travelPause
+    lines.add ""
+    lines.add "You are ambushed!"
+    lines.add ""
+    lines &= firstEncLines
+    return (lines, totalTicks)
+
   for _ in 1..<steps:
     var nextX = -999999; var nextY = -999999; var nextDirStr = ""
     for (ddx, ddy) in searchOrder:
@@ -843,6 +973,15 @@ proc travelRoad*(state: var GameState; direction: string; steps: int): (seq[stri
       lines.add &"You arrive at {name}."
       lines.add ""
       lines.add tileLines(state, curX, curY)
+      return (lines, totalTicks)
+
+    let encLines = checkEncounter(state, curX, curY)
+    if encLines.len > 0:
+      lines.add travelPause
+      lines.add ""
+      lines.add "You are ambushed!"
+      lines.add ""
+      lines &= encLines
       return (lines, totalTicks)
 
   # Finished all steps

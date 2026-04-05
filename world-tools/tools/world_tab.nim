@@ -99,6 +99,10 @@ proc tileToJson(t: TileEntry): JsonNode =
   var npcsArr = newJArray()
   for npc in t.global_npcs: npcsArr.add newJString(npc)
   result["global_npcs"] = npcsArr
+  result["encounter_chance"] = newJInt(t.encounter_chance)
+  var encTagsArr = newJArray()
+  for tag in t.encounter_tags: encTagsArr.add newJString(tag)
+  result["encounter_tags"] = encTagsArr
 
 proc tileFromJson(j: JsonNode): TileEntry =
   result.x          = j.getOrDefault("x").getInt
@@ -117,6 +121,9 @@ proc tileFromJson(j: JsonNode): TileEntry =
       result.rooms.add r
   if j.hasKey("global_npcs") and j["global_npcs"].kind == JArray:
     for n in j["global_npcs"]: result.global_npcs.add n.getStr
+  result.encounter_chance = j.getOrDefault("encounter_chance").getInt(0)
+  if j.hasKey("encounter_tags") and j["encounter_tags"].kind == JArray:
+    for tag in j["encounter_tags"]: result.encounter_tags.add tag.getStr
 
 proc toJson(p: WorldPlugin): JsonNode =
   result = newJObject()
