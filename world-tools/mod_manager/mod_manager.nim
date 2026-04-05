@@ -20,9 +20,11 @@ import "../theme"
 
 # ── Layout constants (mod_manager specific) ───────────────────────────────────
 
+var
+  WIN_W    = 1200  ## updated on window resize
+  WIN_H    = 900   ## updated on window resize
+
 const
-  WIN_W    = 1200
-  WIN_H    = 900
   HEADER_H = 30   ## modpack selector bar
 
 # ── Tab definitions ───────────────────────────────────────────────────────────
@@ -260,10 +262,10 @@ proc render(app: var App) =
   let sty = WIN_H - STATUS_H
   app.ren.setColor(BG2)
   app.ren.fillRect(0, sty, WIN_W, STATUS_H)
-  app.ren.setColor(BG3)
-  app.ren.fillRect(0, sty, WIN_W, 2)
+  app.ren.setColor(FG_DIM)
+  app.ren.fillRect(0, sty, WIN_W, 1)
   discard app.renderText(app.status, PAD,
-                         textCy(sty, STATUS_H, app.fontH),
+                         textCy(sty + 1, STATUS_H - 1, app.fontH),
                          if app.statusOk: FG_OK else: FG_DEL)
 
   # ── Modpack dropdown popup (drawn last / on top) ────────────────────────────
@@ -309,6 +311,13 @@ proc loadModpack(app: var App) =
 
 # ── Export ────────────────────────────────────────────────────────────────────
 
+proc flushStatus(app: var App; msg: string; ok: bool = true) =
+  ## Set status and render one frame immediately so the user sees the message
+  ## before a potentially blocking export operation.
+  app.status   = msg
+  app.statusOk = ok
+  render(app)
+
 proc exportAssets(app: var App) =
   let luaPath = app.driversDir / "assets" / "assets.lua"
   if not fileExists(luaPath):
@@ -332,12 +341,14 @@ proc exportAssets(app: var App) =
 
 proc exportTab(app: var App; tabIdx: int) =
   if TABS[tabIdx].toolId == "assets":
+    app.flushStatus("Exporting assets…")
     app.exportAssets()
     if app.statusOk:
       app.assetsTab.rebuildVFS(app.db)
     return
 
-  let t       = TABS[tabIdx]
+  let t = TABS[tabIdx]
+  app.flushStatus("Exporting " & t.label & "…")
   let luaPath = app.driversDir / t.driver / (t.driver & ".lua")
   if not fileExists(luaPath):
     app.status = "Driver not found: " & luaPath; app.statusOk = false; return
@@ -354,6 +365,7 @@ proc exportTab(app: var App; tabIdx: int) =
   else:     app.status = fmt"[{t.label}] exported {n} file(s)";   app.statusOk = true
 
 proc exportAll(app: var App) =
+  app.flushStatus("Exporting all…")
   var total = 0
   var failed = false
   for i in 0 ..< TABS.len:
@@ -368,8 +380,8 @@ proc exportAll(app: var App) =
     ds.close()
     if n >= 0: total += n else: failed = true
   app.exportAssets()
-  if app.statusOk:
-    app.assetsTab.rebuildVFS(app.db)
+  if not app.statusOk: failed = true
+  else: app.assetsTab.rebuildVFS(app.db)
   if failed: app.status = fmt"Done with errors — {total} file(s)"; app.statusOk = false
   else:      app.status = fmt"Export complete — {total} file(s)";  app.statusOk = true
 
@@ -474,7 +486,7 @@ proc main() =
 
   app.win = createWindow("Menagerie Mod Manager",
                          SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED,
-                         WIN_W, WIN_H,
+                         WIN_W.cint, WIN_H.cint,
                          SDL_WINDOW_SHOWN)
   app.ren  = createRenderer(app.win, -1, Renderer_Accelerated or Renderer_PresentVsync)
   let fontRw = rwFromMem(FONT_DATA.cstring, FONT_DATA.len.cint)
@@ -501,6 +513,13 @@ proc main() =
       case ev.kind
       of QuitEvent:
         app.running = false
+      of WindowEvent:
+        if ev.window.event == WindowEvent_Resized or
+           ev.window.event == WindowEvent_SizeChanged:
+          var w, h: cint
+          app.win.getSize(w, h)
+          WIN_W = w.int
+          WIN_H = h.int
       of MouseMotion:
         app.mouseX = ev.motion.x.int
         app.mouseY = ev.motion.y.int
