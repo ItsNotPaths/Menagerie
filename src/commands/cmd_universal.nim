@@ -83,7 +83,7 @@ proc cmdStatus(state: var GameState; args: seq[string]): CmdResult =
     &"Day {day}  {timeOfDay(state)}",
     &"  Level    {p.level}  ({p.xp:.0f} XP)",
     &"  Health   {p.health:.0f}    Stamina  {p.stamina:.0f}    Focus  {p.focus:.0f}",
-    &"  Gold     {countItem(state, \"currency\")}       Hunger   {p.hunger:.0f}",
+    &"  {anyItem(\"currency\").displayName:<8} {countItem(state, \"currency\")}       Hunger   {p.hunger:.0f}",
   )
 
 

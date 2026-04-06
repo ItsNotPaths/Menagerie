@@ -352,17 +352,6 @@ proc loadAssetIndex(dir: string) =
 # ── Startup ───────────────────────────────────────────────────────────────────
 # loadContent: called once from game_loop at launch. Never Lua-callable.
 
-proc generateCurrencyItem() =
-  ## Synthesise the currency item if it wasn't defined in content files.
-  if "currency" notin items:
-    items["currency"] = ItemDef(
-      id:          "currency",
-      displayName: "Gold",
-      itemType:    "currency",
-      slotCost:    0,
-      canEquip:    false,
-    )
-
 proc generateRoomKeys() =
   ## Synthesise a zero-slot key item for every room that has a lock schedule.
   ## Key id = "key_<room_id>".  Only runs after loadRooms populates the table.
@@ -392,7 +381,6 @@ proc loadContent*(contentDir: string) =
   loadQuests(contentDir)
   loadWorldDef(contentDir)
   loadAssetIndex(contentDir)
-  generateCurrencyItem()
   generateRoomKeys()
   logInfo("content: loaded " &
     $items.len & " items, " &

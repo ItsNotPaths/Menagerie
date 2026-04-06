@@ -59,6 +59,12 @@ proc calcBuyCost(state: GameState; baseCost: int): int =
   result = max(1, int(round(baseCost.float * (1.5 - mercPct * 0.5))))
   result = max(1, int(round(result.float * mods.modifierGet(state, "buy_price_pct"))))
 
+proc calcSellValue(state: GameState; baseVal: int): int =
+  ## Apply mercantile skill and sell_price_pct modifier to a base item value.
+  let mercPct = sk.skillPct(state, "mercantile")
+  result = max(1, int(round(baseVal.float * (0.5 + mercPct * 0.5))))
+  result = max(1, int(round(result.float * mods.modifierGet(state, "sell_price_pct"))))
+
 proc adjustedCost(state: var GameState; itemId: string; baseCost: int): int =
   ## Scale buy price by the active economic event if the item's tags match.
   let ev = activeEvent(state)
@@ -86,10 +92,11 @@ proc shopLines*(state: GameState): seq[string] =
   if tradeArr == nil or tradeArr.kind != JArray:
     return @["  (Nothing for sale.)", "", "  [[Leave:farewell]]"]
 
-  # Collect ordered unique categories
+  # Collect ordered unique categories, excluding currency items
   var seen: seq[string]
   for trade in tradeArr:
     let t = itemType(trade{"receive_item"}.getStr)
+    if t == "currency": continue
     if t notin seen: seen.add t
 
   var lines: seq[string]
@@ -101,9 +108,10 @@ proc shopLines*(state: GameState): seq[string] =
   # Sell panel: player inventory items that have a value
   var sellLines: seq[string]
   for e in state.player.inventory:
+    if itemType(e.id) == "currency": continue
     let v = itemValue(e.id)
     if v > 0:
-      sellLines.add &"  [[{itemDisplay(e.id)} -- {v} currency:sell {e.id}]]"
+      sellLines.add &"  [[{itemDisplay(e.id)} -- {calcSellValue(state, v)} {itemDisplay(currencyId)}:sell {e.id}]]"
   if sellLines.len > 0:
     lines.add ""
     lines.add "Your items:"
@@ -134,7 +142,8 @@ proc shopCategoryLines*(state: GameState; category: string): seq[string] =
   var lines: seq[string]
   for trade in tradeArr:
     let itemId = trade{"receive_item"}.getStr
-    if itemType(itemId) != category.toLowerAscii: continue
+    let iType  = itemType(itemId)
+    if iType == "currency" or iType != category.toLowerAscii: continue
     let amount  = trade{"receive_amount"}.getInt(1)
     let curId   = trade{"currency_item"}.getStr(currencyId)
     let cost    = calcBuyCost(state, trade{"cost"}.getInt(1))
@@ -188,13 +197,9 @@ proc sellItem*(state: var GameState; itemId: string): seq[string] =
   if baseVal <= 0:
     return @[&"{itemDisplay(itemId)} has no trade value."]
 
-  # Mercantile skill increases sell value (0.5x at 0, 1.0x at 100)
-  let mercPct = sk.skillPct(state, "mercantile")
-  var val     = max(1, int(round(baseVal.float * (0.5 + mercPct * 0.5))))
-  # modifier: "sell_price_pct" — positive = higher payout
-  val = max(1, int(round(val.float * mods.modifierGet(state, "sell_price_pct"))))
+  let val = calcSellValue(state, baseVal)
 
   discard takeItem(state, itemId)
   for _ in 0 ..< val: giveItem(state, currencyId)
 
-  @[&"You sell {itemDisplay(itemId)} for {val} currency."]
+  @[&"You sell {itemDisplay(itemId)} for {val} {itemDisplay(currencyId)}."]
