@@ -132,7 +132,8 @@ if $BUILD_MANAGER; then
     mkdir -p "$RELEASE_DIR"
     cp    "$PROJECT_DIR/mod_manager"        "$RELEASE_DIR/mod_manager"
     rm    "$PROJECT_DIR/mod_manager"
-    cp -rf "$PROJECT_DIR/world-tools/drivers" "$RELEASE_DIR/world-tools/drivers"
+    rm -rf "$RELEASE_DIR/world-tools/drivers"
+    cp -r  "$PROJECT_DIR/world-tools/drivers" "$RELEASE_DIR/world-tools/drivers"
 
     echo "==> [manager] Done: $RELEASE_DIR/mod_manager"
 fi
