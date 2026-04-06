@@ -101,7 +101,9 @@ Two threads. Game logic thread reads from `toGame`, writes to `toUi`. SDL2 UI th
 
 **Every action passes ticks.** `passTicks(n, state)` is called after every command — there are no tick-free zones. Town dialogue, shopping, combat turns all cost ticks.
 
-**`.lua` in command fields runs a script.** Any entry in a command list (`tick_commands`, `on_apply_commands`, etc.) that ends in `.lua` is dispatched to the Lua bridge rather than parsed as a command verb.
+**`.lua` in command fields runs a script.** Any entry in a command list (`tick_commands`, `on_apply_commands`, etc.) that ends in `.lua` is dispatched to the Lua bridge rather than parsed as a command verb. Inside those scripts, `engine.cmd(str)` dispatches the same verb surface as flat command strings.
+
+**`api.nim` is the single Lua gateway.** All authored content — effects, spells, armor procs, dialogue scripts — mutates game state only through `api.nim`'s `runCommand`. Other engine modules (saves, dialogue, economy, etc.) are Nim-exported for use by other Nim modules, but are not directly reachable from Lua. The distinction: `# ── Engine Interface ─` / `# ── Engine API ─` sections are Nim-internal; `# ── Script API ─` sections are wired through `api.nim` and Lua-callable.
 
 **No telegraphs.** Enemy intent is not announced. Players read the grid (position, distance, speed) and predict. Melee enemies attack only at distance 1.
 
@@ -119,7 +121,7 @@ Two threads. Game logic thread reads from `toGame`, writes to `toUi`. SDL2 UI th
 | `game_loop.nim` | Game thread, receives player input, dispatches to command registry |
 | `commands/core.nim` | `CmdResult` type, registry, dispatch, aliases |
 | `commands/cmd_*.nim` | Player-input handlers by context |
-| `api.nim` | Content-callable commands (`damage`, `add_effect`, `give`, `give_xp`, `add_bounty`, `set_hostile`, `journal_write`, `journal_append`, etc.) |
+| `api.nim` | Lua/content command surface — `runCommand` dispatcher: `damage`, `add_effect`, `remove_effect`, `set_stat`, `give`, `print`, `set_var`, `add_bounty`, `set_hostile`, `journal_write`, `journal_append`, `give_xp`, `train_skill`, `cast`/`cast_spell`, `pause`, `open_dialogue`, `open_shop`, `buy`, `sell` |
 | `combat.nim` | Grid movement, trifecta resolution, player actions, aux spells, start/end/flee |
 | `combat_ai.nim` | AI condition DSL — `evalCondition`, `pickAction` (included by combat.nim) |
 | `combat_display.nim` | Status lines, weapon stats, option buttons (included by combat.nim) |
@@ -128,7 +130,7 @@ Two threads. Game logic thread reads from `toGame`, writes to `toUi`. SDL2 UI th
 | `clock.nim` | `passTicks()` — hunger, sleep deprivation, forwards to conditions |
 | `conditions.nim` | Effect tick-down, on_expire, interaction chains |
 | `armor.nim` | Plate loader + iteration — procs dispatched via `modifiers.fireEvent` |
-| `scripting.nim` | Lua 5.4 bridge — `callScript`, `callEffect` |
+| `scripting.nim` | Lua 5.4 bridge — `runScript`; exposes `engine` table to Lua (`engine.cmd`, `engine.get_var`, `engine.set_var`, `engine.print`) |
 | `modifiers.nim` | `modGet()` accumulator, `fireEvent()` dispatcher |
 
 `commands/` and `api.nim` are intentionally separate to avoid circular imports — player input goes through the command registry, authored content goes through `api.nim`.

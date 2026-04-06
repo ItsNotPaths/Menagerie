@@ -310,6 +310,32 @@ proc cmdDbLua(state: var GameState; args: seq[string]): CmdResult =
   ok(@[&"[dblua] {args[0]}"] & lines)
 
 
+# ── dbroom ────────────────────────────────────────────────────────────────────
+
+proc cmdDbRoom(state: var GameState; args: seq[string]): CmdResult =
+  let roomId = if args.len > 0: args[0].toLowerAscii
+               else: state.player.currentRoom
+  if roomId == "":
+    return err("Not in a room. Usage: dbroom [room_id]")
+  let room = content.getRoom(roomId)
+  let dt   = dayTick(state)
+  var lines = @[&"-- room: {roomId} --"]
+  if room.id == "":
+    lines.add "  (not found in content)"
+    return ok(lines)
+  lines.add &"  name:         {room.name}"
+  lines.add &"  type:         {room.roomType}"
+  lines.add &"  day tick:     {dt}  ({clock.tickToAmPm(dt)})"
+  if room.lockSchedule.len == 0:
+    lines.add "  lock_schedule: (none)"
+  else:
+    lines.add "  lock_schedule:"
+    for e in room.lockSchedule:
+      lines.add &"    tick {e.tick} ({clock.tickToAmPm(e.tick)}): {(if e.locked: \"lock\" else: \"unlock\")}"
+  lines.add &"  isRoomLocked: {world.isRoomLocked(roomId, dt)}"
+  ok(lines)
+
+
 # ── registration ──────────────────────────────────────────────────────────────
 
 proc initCmdDebug*() =
@@ -330,3 +356,4 @@ proc initCmdDebug*() =
   registerAny("dbgrantperk", cmdDbGrantPerk, hidden = true)
   registerAny("dbseed",      cmdDbSeed,      hidden = true)
   registerAny("dblua",       cmdDbLua,       hidden = true)
+  registerAny("dbroom",      cmdDbRoom,      hidden = true)

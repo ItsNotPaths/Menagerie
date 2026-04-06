@@ -28,6 +28,14 @@ proc dayTick*(state: GameState): int =
   state.player.tick mod ticksPerDay
 
 
+proc tickToAmPm*(tick: int): string =
+  ## Convert a day tick (0-239) to a short 12-hour string, e.g. "8AM", "3PM".
+  let hour24 = tick div ticksPerHour
+  let hour12  = if hour24 mod 12 == 0: 12 else: hour24 mod 12
+  let suffix  = if hour24 < 12: "AM" else: "PM"
+  result = $hour12 & suffix
+
+
 proc timeOfDay*(state: GameState): string =
   ## Human-readable 12-hour time, e.g. "2:30 PM".
   let dt     = dayTick(state)

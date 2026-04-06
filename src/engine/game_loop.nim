@@ -5,7 +5,7 @@
 ##
 ## Call startGameThread(contentDir) from the main thread before ui.main().
 
-import std/[json, os, strformat, random]
+import std/[json, os, strformat, strutils, random]
 import state
 import content
 import gameplay_vars
@@ -32,18 +32,24 @@ import ../ui/ipc
 
 # ── HUD builder ───────────────────────────────────────────────────────────────
 
+proc statBar(current, maximum: float; width = 8): string =
+  let f = if maximum > 0: max(0, min(width, int(current / maximum * width.float))) else: 0
+  "/".repeat(f) & "=".repeat(width - f)
+
 proc buildStatLines(state: GameState): seq[string] =
   let p   = state.player
   let day = p.tick div ticksPerDay + 1
   @[
     &"Day: {day}  {timeOfDay(state)}",
     &"Level: {p.level}",
-    &"HP: {p.health.int} / {p.maxHealth.int}",
-    &"Stamina: {p.stamina.int} / {p.maxStamina.int}",
-    &"Focus: {p.focus.int} / {p.maxFocus.int}",
+    &"Gold: {p.gold}",
+    "=-=-=-=",
+    &"HP: {p.health.int} / {p.maxHealth.int:>3} | {statBar(p.health, p.maxHealth)}",
+    &"Stamina: {p.stamina.int} / {p.maxStamina.int:>3} | {statBar(p.stamina, p.maxStamina)}",
+    &"Focus: {p.focus.int} / {p.maxFocus.int:>3} | {statBar(p.focus, p.maxFocus)}",
+    "=-=-=-=",
     &"Fatigue: {p.fatigue.int}",
     &"Hunger: {p.hunger.int}",
-    &"Gold: {p.gold}",
   ]
 
 
@@ -59,7 +65,8 @@ proc pushLines(lines: seq[string]) =
       toUi.send(UiMsg(kind: umPrint, line: line))
 
 proc pushStats(state: GameState) =
-  toUi.send(UiMsg(kind: umStats, statLines: buildStatLines(state)))
+  toUi.send(UiMsg(kind: umStats, statLines: buildStatLines(state),
+                  dayTick: clock.dayTick(state)))
 
 proc pushResult(res: CmdResult; state: GameState) =
   pushLines(res.lines)

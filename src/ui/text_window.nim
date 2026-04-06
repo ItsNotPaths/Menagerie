@@ -24,7 +24,7 @@ const
   HUD_MARGIN   = 10
   HUD_PAD      = 6
   HUD_LINE_H   = 18
-  HUD_BOX_W    = 220
+  HUD_BOX_W    = 300
   TARGET_FPS   = 60
   FRAME_MS     = 1000 div TARGET_FPS
   CURSOR_BLINK   = 530  # ms
@@ -114,6 +114,7 @@ type
 
     # HUD stats (label, value) pairs — updated via umStats messages
     hudStats: seq[(string, string)]
+    dayTick:  int   ## current tick within day (0-239); drives vignette
 
     # Panel state — tracks where the most recent panel block sits in buf.lines
     # so that umPanelAppend can replace it in-place rather than appending.
@@ -374,16 +375,47 @@ proc renderRightPanel(app: var App) =
     app.ren.setColor(COL_SASH)
     var box = rect(hx.cint, HUD_MARGIN.cint, HUD_BOX_W.cint, boxH.cint)
     discard app.ren.drawRect(box.addr)
+    var maxLabelW = 0
+    for (label, val) in app.hudStats:
+      if val == "": continue   ## separator — skip from column measurement
+      let w = textWidth(app.font, label & ": ")
+      if w > maxLabelW: maxLabelW = w
     for i, (label, val) in app.hudStats:
       let ty = HUD_MARGIN + HUD_PAD + i * HUD_LINE_H
-      let lw = app.ren.renderText(app.font, label & ": ",
-                                  hx + HUD_PAD, ty, COL_FG_DIM)
-      discard app.ren.renderText(app.font, val,
-                                  hx + HUD_PAD + lw, ty, COL_FG)
+      if val == "":
+        let sw = textWidth(app.font, label)
+        discard app.ren.renderText(app.font, label,
+                                   hx + HUD_PAD + (HUD_BOX_W - HUD_PAD * 2 - sw) div 2,
+                                   ty, COL_FG_DIM)
+      else:
+        discard app.ren.renderText(app.font, label & ": ", hx + HUD_PAD, ty, COL_FG_DIM)
+        discard app.ren.renderText(app.font, val, hx + HUD_PAD + maxLabelW, ty, COL_FG)
 
 proc renderSash(app: var App; hot: bool) =
   app.ren.setColor(if hot: COL_SASH_HOT else: COL_SASH)
   app.ren.fillRect(app.sashX, 0, SASH_W, app.winH)
+
+proc vignetteAlpha(dayTick: int): uint8 =
+  ## 0 = fully clear (10AM–2PM), 180 = darkest (10PM–2AM).
+  ## Linear fades over the 8-hour transitions between those anchors.
+  const MAX = 180
+  # night: 0–20 and 220–239
+  if dayTick <= 20 or dayTick >= 220: return MAX
+  # dawn fade-out: 20–100
+  if dayTick < 100: return uint8(MAX * (100 - dayTick) div 80)
+  # midday clear: 100–140
+  if dayTick <= 140: return 0
+  # dusk fade-in: 140–220
+  return uint8(MAX * (dayTick - 140) div 80)
+
+proc renderVignette(app: var App) =
+  let alpha = vignetteAlpha(app.dayTick)
+  if alpha == 0: return
+  let panelX = app.sashX + SASH_W
+  app.ren.setColor((r: 0u8, g: 0u8, b: 0u8, a: alpha))
+  discard app.ren.setDrawBlendMode(BlendMode_Blend)
+  app.ren.fillRect(panelX, 0, app.winW - panelX, app.winH)
+  discard app.ren.setDrawBlendMode(BlendMode_None)
 
 proc render(app: var App) =
   app.ren.setColor(COL_BG)
@@ -393,6 +425,7 @@ proc render(app: var App) =
   else:
     app.renderLeftPanel()
   app.renderRightPanel()
+  app.renderVignette()
   var mx, my: cint
   discard getMouseState(mx.addr, my.addr)
   app.renderSash(app.draggingSash or
@@ -611,6 +644,7 @@ proc main*() =
           let i = s.find(": ")
           if i >= 0: app.hudStats.add (s[0 ..< i], s[i + 2 .. ^1])
           else:      app.hudStats.add (s, "")
+        app.dayTick = msg.dayTick
       of umPanelReplace:
         # Establish a new panel anchor at the current end of the buffer.
         app.panelStart = app.buf.lines.len

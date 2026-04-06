@@ -11,7 +11,7 @@ import commands/core
 import engine/api
 
 const invCategories  = ["weapon", "armor", "consumable", "container",
-                        "material", "quest", "currency"]
+                        "material", "quest", "currency", "key"]
 const armorSlotOrder = ["head", "chest", "hands", "legs", "feet", "back", "neck", "ring"]
 
 

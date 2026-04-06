@@ -47,9 +47,12 @@ type
     openingDialogue*:                string
     raw*:                            JsonNode   ## full JSON (topics, schedule, inventory, loot)
 
+  LockEntry* = tuple[tick: int; locked: bool]
+
   RoomDef* = object
     id*, name*, roomType*, description*, image*: string
-    raw*:                                        JsonNode   ## enemies, sprite_positions, etc.
+    lockSchedule*: seq[LockEntry]
+    raw*:          JsonNode   ## enemies, sprite_positions, etc.
 
   TileDef* = object
     ## A tile is a named location (town/dungeon) with its own room graph.
@@ -224,13 +227,21 @@ proc loadRooms(dir: string) =
     if d.kind != JObject: continue
     # room id = filename without extension
     let id = f.splitFile.name
+    var lockSched: seq[LockEntry]
+    let ls = d{"lock_schedule"}
+    if not ls.isNil and ls.kind == JArray:
+      for entry in ls:
+        if entry.kind == JObject:
+          lockSched.add (tick: entry{"tick"}.getInt,
+                         locked: entry{"locked"}.getBool)
     rooms[id] = RoomDef(
-      id:       id,
-      name:     d{"name"}.getStr(id),
-      roomType: d{"type"}.getStr,
-      description: d{"description"}.getStr,
-      image:    d{"image"}.getStr,
-      raw:      d,
+      id:           id,
+      name:         d{"name"}.getStr(id),
+      roomType:     d{"type"}.getStr,
+      description:  d{"description"}.getStr,
+      image:        d{"image"}.getStr,
+      lockSchedule: lockSched,
+      raw:          d,
     )
 
 proc loadEncounters(dir: string) =
@@ -340,6 +351,20 @@ proc loadAssetIndex(dir: string) =
 # ── Startup ───────────────────────────────────────────────────────────────────
 # loadContent: called once from game_loop at launch. Never Lua-callable.
 
+proc generateRoomKeys() =
+  ## Synthesise a zero-slot key item for every room that has a lock schedule.
+  ## Key id = "key_<room_id>".  Only runs after loadRooms populates the table.
+  for id, room in rooms:
+    if room.lockSchedule.len == 0: continue
+    let keyId = "key_" & id
+    items[keyId] = ItemDef(
+      id:          keyId,
+      displayName: (if room.name.len > 0: room.name else: id) & " Key",
+      itemType:    "key",
+      slotCost:    0,
+      canEquip:    false,
+    )
+
 proc loadContent*(contentDir: string) =
   ## Load all content from contentDir at startup. Call once before game loop.
   loadItems(contentDir)
@@ -355,6 +380,7 @@ proc loadContent*(contentDir: string) =
   loadQuests(contentDir)
   loadWorldDef(contentDir)
   loadAssetIndex(contentDir)
+  generateRoomKeys()
   logInfo("content: loaded " &
     $items.len & " items, " &
     $spells.len & " spells, " &

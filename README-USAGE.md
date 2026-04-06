@@ -626,7 +626,7 @@ Quest definitions in `content/quests/<id>.json` are documentation only — they 
 
 ## Command API
 
-All effect `tick_commands`, spell `on_hit_commands`, armor proc `commands`, and scripts share the same command surface via `engine/api.nim`.
+All effect `tick_commands`, spell `on_hit_commands`, armor proc `commands`, dialogue `inline_script`, and Lua scripts share the same command surface via `engine/api.nim`. This is the only path for authored content to mutate game state.
 
 ### Target Selectors
 
@@ -645,10 +645,20 @@ add_effect      <target> <effect_id> <duration>
 remove_effect   <target> <effect_id>
 set_stat        <target> <stat> <value>        stat: health | stamina | focus | hunger | fatigue
 give            <target> <item_id> [amount]
-move_npc        <npc_id> <tile>
 print           [<target>] <text...>
+set_var         <key> <value>
+add_bounty      <faction> <amount>
+set_hostile     <npc_id>
+journal_write   <page> <text...>
+journal_append  <text...>
+give_xp         player <amount>
+train_skill     player <skill> <amount>
 cast            <mode> <spell_id> <row> [dist]
-economic_event  <event_id> [force]
+pause
+open_dialogue   <npc_id>
+open_shop       <shop_id>
+buy             <item_id>
+sell            <item_id>
 ```
 
 **Script files** — any command entry ending in `.lua` is treated as a script filename and run through the Lua engine. Works in every command field (`tick_commands`, `on_apply_commands`, proc commands, event hook commands, etc.):
@@ -664,10 +674,17 @@ damage enemy.self 5 stamina
 damage enemy.all 3 focus
 ```
 
-**`add_effect`** — apply an effect for N ticks:
+**`add_effect`** — apply an effect for N ticks. Pass `-1` for permanent (perk-style):
 ```
 add_effect player burning 3
 add_effect enemy.self stunned 2
+add_effect player perk_iron_skin -1
+```
+
+**`remove_effect`** — remove an effect by ID:
+```
+remove_effect player burning
+remove_effect player perk_iron_skin
 ```
 
 **`set_stat`** — set or adjust any stat, absolute or relative, clamped to `[0, max]`:
@@ -677,7 +694,7 @@ set_stat player health +20
 set_stat player stamina -5
 set_stat enemy.self focus +10
 ```
-Shorthands `set_health`, `set_stamina`, `set_focus` also work and are equivalent.
+Shorthands `set_health`, `set_stamina`, `set_focus` also work.
 
 **`give`** — give item(s) to the player:
 ```
@@ -685,84 +702,128 @@ give player satchel
 give player gold 5
 ```
 
-**`move_npc`** — relocate a named NPC to a tile (takes effect on next room entry):
-```
-move_npc town-villager spawn
-```
-
 **`print`** — emit a narration line:
 ```
 print The ground shakes.
 ```
 
-**`cast`** — fire a spell (from armor proc or script):
+**`set_var`** — write a game variable (numeric strings stored as float):
+```
+set_var quest_done 1
+set_var farmer-disposition 10
+```
+
+**`add_bounty`** — adjust `bounty_<faction>` variable up or down:
+```
+add_bounty city_guard 2
+add_bounty city_guard -1
+```
+
+**`set_hostile`** — mark a named NPC hostile in npc_states:
+```
+set_hostile blacksmith
+```
+
+**`journal_write`** — overwrite journal page N (1-indexed) with text:
+```
+journal_write 1 You find a torn note.
+```
+
+**`journal_append`** — append a line to the last journal page:
+```
+journal_append The handwriting is shaky.
+```
+
+**`give_xp`** — award XP to the player:
+```
+give_xp player 50
+```
+
+**`train_skill`** — directly increment a skill by a fixed amount:
+```
+train_skill player destruction 5
+```
+
+**`cast`** — fire a spell inline (from armor proc or effect command). No focus cost or cooldown:
 ```
 cast beam death 5
 cast smite frost 3 2
 cast wave bleed 4
 ```
 
-**`economic_event`** — activate an economic event by ID. Prices in all shops are adjusted for items whose `tags` include the event's `tag`. The event expires automatically after `tick_scope` ticks. Silently ignored if another event is already active; pass `force` to override:
+**`pause`** — inject a `__PAUSE__` sentinel into the output. Used by effects and procs to split multi-step narration across turns.
+
+**`open_dialogue`** — start dialogue with an NPC (evaluates opening conditions, prints greeting and topic menu):
 ```
-economic_event iron_shortage
-economic_event iron_shortage force
+open_dialogue blacksmith
+```
+
+**`open_shop`** — open a shop by ID (sets active shop, returns category listing):
+```
+open_shop blacksmith
+```
+
+**`buy`** / **`sell`** — execute a trade against the currently active shop:
+```
+buy iron-sword
+sell iron-sword
 ```
 
 ---
 
 ## Scripts
 
-Scripts are `.lua` files in `content/scripts/`. Triggered via `death_script` in NPC JSON or `inline_script` in dialogue topics. Run through the embedded Lua 5.4 engine.
+Scripts are `.lua` files in `content/scripts/`. Triggered via `death_script` in NPC JSON, `inline_script` in dialogue topics, or any command field that ends in `.lua`. Run through the embedded Lua 5.4 engine.
 
 ### Flat Command Syntax
 
-Command fields (`tick_commands`, `on_apply_commands`, `inline_script`, etc.) accept a list of command strings. Each string is one command verb + args:
+Command fields (`tick_commands`, `on_apply_commands`, `inline_script`, etc.) accept a list of command strings. Each string is one command verb + args — the same verbs as the Command API above:
 
 ```
 damage player 10
 add_effect player burning 3
 remove_effect player burning
-set_stat player health 50
 set_stat player health +20
-give player satchel
 give player satchel 3
-move_npc town-villager spawn
-msg You find a satchel on the corpse.
-take satchel
-set quest_done 1
-add farmer-disposition 5
-sub bounty 1
+set_var quest_done 1
+add_bounty city_guard 1
+journal_write 1 You find a torn note.
+give_xp player 50
+open_dialogue blacksmith
 ```
 
 ### Lua Logic
 
-Script files are full Lua 5.4. Game functions are available as globals. Use `get_var` / `set_var` to read and write game variables.
+Script files are full Lua 5.4. Game state is reached through the `engine` table. All commands from the Command API are callable via `engine.cmd`.
 
 ```lua
-if get_var("farmer_disposition") >= 10 then
-    msg("You already know this person well.")
+-- run any command verb
+engine.cmd("damage player 10")
+engine.cmd("add_effect player burning 3")
+engine.cmd("give player gold 5")
+engine.cmd("set_var quest_done 1")
+
+-- read / write game variables
+local disp = tonumber(engine.get_var("farmer-disposition")) or 0
+if disp >= 10 then
+    engine.print("You already know this person well.")
 else
-    give("player", "gold", 5)
-    add_var("farmer-disposition", 5)
-    msg("They hand you something.")
+    engine.cmd("give player gold 5")
+    engine.cmd("set_var farmer-disposition " .. (disp + 5))
+    engine.print("They hand you something.")
 end
 ```
 
 ### Available Functions
 
+The Lua runtime exposes the `engine` table with the following functions:
+
 ```lua
-damage(selector, amount)
-damage(selector, amount, stat)           -- stat: "health" | "stamina" | "focus"
-add_effect(selector, effect_id, duration)
-remove_effect(selector, effect_id)
-set_stat(selector, stat, value)          -- stat: "health" | "stamina" | "focus" | "hunger" | "fatigue"
-give(selector, item_id)
-give(selector, item_id, amount)
-move_npc(npc_id, tile)
-msg(text)
-take(item_id)
-get_var(name)                            -- read a game variable
-set_var(name, value)                     -- write a game variable
-add_var(name, amount)                    -- add to a numeric variable
-sub_var(name, amount)                    -- subtract from a numeric variable
+engine.cmd(str)              -- dispatch any command string from the Command API
+engine.print(str)            -- emit a narration line to the UI
+engine.get_var(key)          -- read a game variable; returns string or nil
+engine.set_var(key, value)   -- write a game variable (numeric strings stored as float)
+print(str)                   -- alias for engine.print
 ```
+
+All game mutations go through `engine.cmd`. There are no separate Lua globals for `damage`, `give`, etc. — use `engine.cmd("damage player 10")` instead.

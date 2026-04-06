@@ -34,6 +34,7 @@ type
       sprites*: seq[SpriteEntry]
     of umStats:
       statLines*: seq[string]   ## "Label: value" — one per HUD row
+      dayTick*:   int           ## current tick within day (0-239) for vignette
     of umPanelReplace:
       replaceLines*: seq[string]
     of umPanelAppend:

@@ -14,6 +14,7 @@ import engine/content
 import engine/clock
 import engine/saves
 import engine/gameplay_vars
+import engine/items
 
 # ── Terrain constants ─────────────────────────────────────────────────────────
 
@@ -209,7 +210,7 @@ proc categoryForType(tileType: string): string =
   else: "ruins"
 
 
-proc currentCategory(state: GameState): string =
+proc currentCategory*(state: GameState): string =
   ## Room category for wherever the player currently is.
   if state.variables.getOrDefault("_in_encounter", newJBool(false)).getBool:
     return "encounters"
@@ -333,7 +334,6 @@ proc rollStartPosition*(npcRaw: JsonNode): (int, int) =
 
 proc spawnTileEnemies(state: var GameState; tileKey: string; tileDef: TileDef; tileType: string) =
   ## Spawn persistent npc_states entries for every enemy listed in tile's rooms.
-  let cat = categoryForType(tileType)
   for roomId in tileDef.rooms:
     let room = content.getRoom(roomId)
     if room.id == "": continue
@@ -392,6 +392,26 @@ proc roomAllowsWait*(state: GameState): bool =
   ## True if no hostile occupants are present in the current room.
   if state.player.currentRoom == "": return true
   not getNpcsInRoom(state).anyIt(it.hostile)
+
+
+proc isRoomLocked*(roomId: string; dayTick: int): bool =
+  ## Returns the locked state of a room at the given day tick (0-239).
+  ## Picks the most recent entry with tick <= dayTick. If none applies,
+  ## wraps to the previous day's final entry (highest tick in schedule).
+  let room = content.getRoom(roomId)
+  if room.lockSchedule.len == 0: return false
+  var bestTick = -1
+  var bestLocked = false
+  for entry in room.lockSchedule:
+    if entry.tick <= dayTick and entry.tick > bestTick:
+      bestTick   = entry.tick
+      bestLocked = entry.locked
+  if bestTick == -1:
+    for entry in room.lockSchedule:
+      if entry.tick > bestTick:
+        bestTick   = entry.tick
+        bestLocked = entry.locked
+  result = bestLocked
 
 
 # ── Tile lines ────────────────────────────────────────────────────────────────
@@ -466,7 +486,6 @@ proc encounterLines(state: GameState): seq[string] =
 
 proc roomLines*(state: GameState): seq[string] =
   ## Description lines for the player's current room inside a location.
-  let (x, y) = state.player.position
   let roomId = state.player.currentRoom
   if roomId == "": return @["(No location data.)"]
 
@@ -717,6 +736,16 @@ proc moveToRoom*(state: var GameState; roomId: string): seq[string] =
   if roomId notin connections:
     let avail = if connections.len > 0: connections.join(", ") else: "none"
     return @[&"'{roomId}' is not connected here.", &"Connected: {avail}"]
+  if isRoomLocked(roomId, dayTick(state)):
+    let keyId = "key_" & roomId
+    if not hasItem(state, keyId):
+      let room = content.getRoom(roomId)
+      let name = if room.name.len > 0: room.name else: roomId
+      return @[&"The way into {name} is locked."]
+    let keyName = content.getItem(keyId).displayName
+    state.player.currentRoom = roomId
+    populateRoomQueue(state)
+    return @[&"Used {keyName}."] & roomLines(state)
   state.player.currentRoom = roomId
   populateRoomQueue(state)
   roomLines(state)

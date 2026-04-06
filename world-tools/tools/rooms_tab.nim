@@ -24,10 +24,13 @@ const
 # ── Types ─────────────────────────────────────────────────────────────────────
 
 type
+  LockEntry = tuple[tick: int; locked: bool]
+
   RoomPreset = object
     id, name, category, `type`, description, image: string
     enemies:          seq[string]
     sprite_positions: seq[SpritePos]
+    lock_schedule:    seq[LockEntry]
     deleted:          bool
 
   RoomsPlugin = object
@@ -39,7 +42,7 @@ type
   PresetItem = tuple[id: string; pidx: int]
 
   EditField = enum
-    efNone, efSearch, efName, efDescLine, efEnemyAdd, efImageFilter
+    efNone, efSearch, efName, efDescLine, efEnemyAdd, efImageFilter, efLockAdd
 
   DropTarget = enum dtNone, dtCategory, dtType, dtImage
 
@@ -112,6 +115,14 @@ type
     spriteBtnX,   spriteBtnY,   spriteBtnW:   int
     copyBtnX,     copyBtnY,     copyBtnW:     int
 
+    ## Lock schedule (rebuilt each render pass)
+    lockPresetBtns:  seq[tuple[x, y, w, h: int]]
+    lockRowRects:    seq[tuple[x, y, w, h: int]]
+    lockAddBtnX, lockAddBtnY, lockAddBtnW:     int
+    lockToggleBtnX, lockToggleBtnY, lockToggleBtnW: int
+    lockAddLocked: bool
+    fLockY:        int
+
     statusMsg*: string
     statusOk*:  bool
 
@@ -143,6 +154,12 @@ proc loadRoomsPlugin(path: string): RoomsPlugin =
         if pair.kind == JArray and pair.len >= 2:
           p.sprite_positions.add [pair[0].getFloat.float32,
                                   pair[1].getFloat.float32]
+    let ls = pn.getOrDefault("lock_schedule")
+    if not ls.isNil and ls.kind == JArray:
+      for entry in ls:
+        if entry.kind == JObject:
+          p.lock_schedule.add (tick: entry{"tick"}.getInt,
+                               locked: entry{"locked"}.getBool)
     if p.id.len > 0:
       result.presets[p.id] = p
 
@@ -169,6 +186,13 @@ proc toJson(p: RoomsPlugin): JsonNode =
       pair.add newJFloat(s[1])
       positions.add pair
     pn["sprite_positions"] = positions
+    var lockArr = newJArray()
+    for entry in pr.lock_schedule:
+      var en = newJObject()
+      en["tick"]   = newJInt(entry.tick)
+      en["locked"] = newJBool(entry.locked)
+      lockArr.add en
+    pn["lock_schedule"] = lockArr
     presetsObj[id] = pn
   result["presets"] = presetsObj
 
@@ -177,6 +201,27 @@ proc save(p: var RoomsPlugin) =
   p.dirty = false
 
 # ── Helpers ────────────────────────────────────────────────────────────────────
+
+proc tickToAmPm(tick: int): string =
+  ## Convert a day tick (0-239, 10 ticks/hr) to a 12-hour AM/PM string.
+  let hour24 = tick div 10
+  let hour12  = if hour24 mod 12 == 0: 12 else: hour24 mod 12
+  let suffix  = if hour24 < 12: "AM" else: "PM"
+  result = $hour12 & suffix
+
+proc parseAmPmTick(s: string): int =
+  ## Parse "8AM", "3pm", "12PM" etc → tick (0-239). Returns -1 on failure.
+  let upper = s.strip().toUpperAscii()
+  let isPm  = upper.endsWith("PM")
+  if not isPm and not upper.endsWith("AM"): return -1
+  let numStr = upper[0 ..< upper.len - 2].strip()
+  var hour: int
+  try: hour = parseInt(numStr)
+  except: return -1
+  if hour < 1 or hour > 12: return -1
+  let hour24 = if isPm: (if hour == 12: 12 else: hour + 12)
+               else:    (if hour == 12: 0  else: hour)
+  result = hour24 * 10
 
 proc inR(x, y, rx, ry, rw, rh: int): bool {.inline.} =
   x >= rx and x < rx + rw and y >= ry and y < ry + rh
@@ -619,6 +664,75 @@ proc renderForm(rt: var RoomsTab; ren: RendererPtr; font: FontPtr;
   rt.spriteBtnW = editBtnW
   cy += ROW_H + PAD
 
+  ## lock schedule preset buttons
+  renderText(ren, font, "presets", lx, cy + (ROW_H - fontH) div 2 - 2, FG_DIM)
+  rt.lockPresetBtns.setLen(0)
+  if not isForeign:
+    const PRESET_LABELS = ["daylocked", "nightlocked"]
+    var bx = ix
+    for lbl in PRESET_LABELS:
+      let bw  = textWidth(font, lbl) + PAD * 2
+      let hot = inR(mx, my, bx, cy, bw, ROW_H)
+      ren.fillRect(bx, cy, bw, ROW_H, if hot: BTN_HOV else: BTN_BG)
+      renderText(ren, font, lbl, bx + PAD, cy + (ROW_H - fontH) div 2 - 2, FG_ACTIVE)
+      rt.lockPresetBtns.add (bx, cy, bw, ROW_H)
+      bx += bw + PAD
+  cy += ROW_H + PAD
+
+  ## lock schedule
+  rt.fLockY = cy
+  renderText(ren, font, "lock", lx, cy + (ROW_H - fontH) div 2 - 2, FG_DIM)
+  rt.lockRowRects.setLen(0)
+  var sortedLocks = pr.lock_schedule
+  sortedLocks.sort(proc(a, b: LockEntry): int = cmp(a.tick, b.tick))
+  for i, entry in sortedLocks:
+    let rowY      = cy + i * ROW_H
+    let stateLabel = if entry.locked: "lock" else: "unlock"
+    let stateCol   = if entry.locked: FG_DEL else: FG_OK
+    ren.fillRect(ix, rowY, iw, ROW_H, BG2)
+    ren.drawRect(ix, rowY, iw, ROW_H, BG3)
+    renderText(ren, font, tickToAmPm(entry.tick), ix + PAD, rowY + (ROW_H - fontH) div 2 - 2,
+               if isForeign: FG_DIM else: FG)
+    renderText(ren, font, stateLabel, ix + PAD + 40, rowY + (ROW_H - fontH) div 2 - 2, stateCol)
+    if not isForeign:
+      let xBtnX = ix + iw - ROW_H
+      let xHot  = inR(mx, my, xBtnX, rowY, ROW_H, ROW_H)
+      renderText(ren, font, "×", xBtnX + (ROW_H - textWidth(font, "×")) div 2,
+                 rowY + (ROW_H - fontH) div 2 - 2, if xHot: FG_ACTIVE else: FG_DEL)
+      rt.lockRowRects.add (ix, rowY, iw, ROW_H)
+  let addRowY = cy + sortedLocks.len * ROW_H
+  if not isForeign:
+    if rt.editField == efLockAdd:
+      let tickW = iw div 2
+      ren.fillRect(ix, addRowY, tickW, ROW_H, BG2)
+      ren.drawRect(ix, addRowY, tickW, ROW_H, FG_ACTIVE)
+      if rt.editBuf.len > 0:
+        renderText(ren, font, rt.editBuf, ix + PAD, addRowY + (ROW_H - fontH) div 2 - 2, FG_ACTIVE)
+      else:
+        renderText(ren, font, "8AM…", ix + PAD, addRowY + (ROW_H - fontH) div 2 - 2, FG_DIM)
+      if showCaret:
+        let cx = ix + PAD + textWidth(font, rt.editBuf[0 ..< rt.editCursorPos])
+        ren.drawVLine(cx, addRowY + 3, ROW_H - 6, FG_ACTIVE)
+      let toggleLbl = if rt.lockAddLocked: "lock" else: "unlock"
+      let toggleCol = if rt.lockAddLocked: FG_DEL else: FG_OK
+      let tBtnX = ix + tickW + PAD
+      let tBtnW = textWidth(font, toggleLbl) + PAD * 2
+      let tHot  = inR(mx, my, tBtnX, addRowY, tBtnW, ROW_H)
+      ren.fillRect(tBtnX, addRowY, tBtnW, ROW_H, if tHot: BTN_HOV else: BTN_BG)
+      renderText(ren, font, toggleLbl, tBtnX + PAD, addRowY + (ROW_H - fontH) div 2 - 2, toggleCol)
+      rt.lockToggleBtnX = tBtnX
+      rt.lockToggleBtnY = addRowY
+      rt.lockToggleBtnW = tBtnW
+    else:
+      let addBtnW = textWidth(font, "+ Add") + PAD * 2
+      let addHot  = inR(mx, my, ix, addRowY + 3, addBtnW, CHIP_H)
+      ren.fillRect(ix, addRowY + 3, addBtnW, CHIP_H, if addHot: BTN_HOV else: BTN_BG)
+      renderText(ren, font, "+ Add", ix + PAD, addRowY + 3 + (CHIP_H - fontH) div 2 - 2, FG_OK)
+      rt.lockAddBtnX = ix
+      rt.lockAddBtnY = addRowY + 3
+      rt.lockAddBtnW = addBtnW
+  cy = addRowY + ROW_H + PAD
+
   ## Copy to Active Plugin (foreign presets only)
   if isForeign:
     rt.fCopyBtnY = cy
@@ -897,6 +1011,52 @@ proc handleMouseDown*(rt: var RoomsTab; x, y, btn: int; activePluginPath: string
     rt.sc.openCanvas(pr.sprite_positions)
     return
 
+  ## lock schedule preset buttons
+  for i, cr in rt.lockPresetBtns:
+    if isForeign: break
+    if inR(x, y, cr.x, cr.y, cr.w, cr.h):
+      if not ap.isNil and ap.presets.hasKey(rt.selPresetId):
+        let newSched: seq[LockEntry] =
+          if i == 0: @[(tick: 80,  locked: true),  (tick: 200, locked: false)]
+          else:      @[(tick: 80,  locked: false), (tick: 200, locked: true)]
+        ap.presets[rt.selPresetId].lock_schedule = newSched
+        ap.dirty = true; rt.statusMsg = "Unsaved changes"; rt.statusOk = true
+      return
+
+  ## lock schedule × buttons
+  for i, cr in rt.lockRowRects:
+    if isForeign: break
+    let xBtnX = cr.x + cr.w - ROW_H
+    if inR(x, y, xBtnX, cr.y, ROW_H, cr.h):
+      if not ap.isNil and ap.presets.hasKey(rt.selPresetId):
+        var sortedLocks = ap.presets[rt.selPresetId].lock_schedule
+        sortedLocks.sort(proc(a, b: LockEntry): int = cmp(a.tick, b.tick))
+        if i < sortedLocks.len:
+          let tickToRemove = sortedLocks[i].tick
+          var newSched: seq[LockEntry]
+          for entry in ap.presets[rt.selPresetId].lock_schedule:
+            if entry.tick != tickToRemove: newSched.add entry
+          ap.presets[rt.selPresetId].lock_schedule = newSched
+          ap.dirty = true; rt.statusMsg = "Unsaved changes"; rt.statusOk = true
+      return
+
+  ## lock schedule + Add button
+  if rt.editField != efLockAdd and
+     inR(x, y, rt.lockAddBtnX, rt.lockAddBtnY, rt.lockAddBtnW, CHIP_H) and
+     not isForeign:
+    if rt.editField == efDescLine: rt.syncDescLine()
+    rt.commitEdit()
+    rt.lockAddLocked = false
+    rt.enterEdit(efLockAdd, "")
+    return
+
+  ## lock schedule toggle button
+  if rt.editField == efLockAdd and
+     inR(x, y, rt.lockToggleBtnX, rt.lockToggleBtnY, rt.lockToggleBtnW, ROW_H) and
+     not isForeign:
+    rt.lockAddLocked = not rt.lockAddLocked
+    return
+
   ## Copy to Active Plugin (foreign)
   if isForeign and inR(x, y, rt.copyBtnX, rt.copyBtnY, rt.copyBtnW, BTN_H):
     if not ap.isNil:
@@ -935,7 +1095,7 @@ proc handleTextInput*(rt: var RoomsTab; text: string) =
     rt.editCursorPos += text.len
     rt.searchBuf = rt.editBuf
     rt.buildFiltered()
-  of efName, efEnemyAdd, efDescLine:
+  of efName, efEnemyAdd, efDescLine, efLockAdd:
     rt.editBuf.insert(text, rt.editCursorPos)
     rt.editCursorPos += text.len
   of efImageFilter:
@@ -1148,7 +1308,26 @@ proc handleKeyDown*(rt: var RoomsTab; sym: Scancode; ctrl, shift: bool) =
     else: discard
     return
 
-  ## Single-line fields: efName, efEnemyAdd
+  ## Lock add: Enter commits entry, Escape cancels; cursor keys fall through
+  if rt.editField == efLockAdd:
+    if sym in {SDL_SCANCODE_RETURN, SDL_SCANCODE_KP_ENTER}:
+      let tickVal = parseAmPmTick(rt.editBuf)
+      if tickVal >= 0:
+        let ap = rt.activePlugin()
+        if not ap.isNil and ap.presets.hasKey(rt.selPresetId):
+          ap.presets[rt.selPresetId].lock_schedule.add (tick: tickVal,
+                                                        locked: rt.lockAddLocked)
+          ap.dirty = true; rt.statusMsg = "Unsaved changes"; rt.statusOk = true
+      elif rt.editBuf.strip().len > 0:
+        rt.statusMsg = "Invalid time — use e.g. 8AM or 3PM"; rt.statusOk = false
+        return
+      rt.editField = efNone
+      return
+    elif sym == SDL_SCANCODE_ESCAPE:
+      rt.editField = efNone
+      return
+
+  ## Single-line fields: efName, efEnemyAdd, efLockAdd
   case sym
   of SDL_SCANCODE_RETURN, SDL_SCANCODE_KP_ENTER:
     rt.commitEdit()
