@@ -80,7 +80,6 @@ proc playerToJson(p: PlayerState): JsonNode =
   result["lastRestPosition"]  = %[p.lastRestPosition[0], p.lastRestPosition[1]]
   result["lastRestRoom"]      = %p.lastRestRoom
   result["tick"]              = %p.tick
-  result["gold"]              = %p.gold
   result["health"]            = %p.health
   result["stamina"]           = %p.stamina
   result["focus"]             = %p.focus
@@ -142,8 +141,6 @@ proc playerFromJson(j: JsonNode): PlayerState =
     result.lastRestRoom = j["lastRestRoom"].getStr
   if "tick" in j:
     result.tick = j["tick"].getInt
-  if "gold" in j:
-    result.gold = j["gold"].getInt
   if "health" in j:
     result.health = j["health"].getFloat
   if "stamina" in j:
@@ -182,6 +179,16 @@ proc playerFromJson(j: JsonNode): PlayerState =
         slots: e["slots"].getInt,
         count: e["count"].getInt,
       )
+
+  # Migrate old saves: convert legacy "gold" field to currency inventory entry.
+  if "gold" in j:
+    let legacyGold = j["gold"].getInt
+    if legacyGold > 0:
+      var hasCurrency = false
+      for e in result.inventory:
+        if e.id == "currency": hasCurrency = true; break
+      if not hasCurrency:
+        result.inventory.add InventoryEntry(id: "currency", slots: 0, count: legacyGold)
 
   if "armor" in j:
     for zone, plate in j["armor"]:
@@ -389,7 +396,9 @@ proc newGame*(state: var GameState) =
   state.player.maxStamina = gvFloat("player_stamina_max", 100.0)
   state.player.focus      = gvFloat("player_focus",        50.0)
   state.player.maxFocus   = gvFloat("player_focus_max",    50.0)
-  state.player.gold       = gvInt("new_game_gold",          50)
+  let startGold = gvInt("new_game_gold", 50)
+  if startGold > 0:
+    state.player.inventory.add InventoryEntry(id: "currency", slots: 0, count: startGold)
   state.player.hunger     = gvFloat("new_game_hunger",     100.0)
   for name in skills.SKILL_NAMES:
     state.player.skills[name] = 0

@@ -27,7 +27,6 @@ type
     tick*:             int          ## total ticks elapsed this playthrough
 
     # ── Resources ─────────────────────────────────────────────────────────────
-    gold*:             int
     health*:           float
     stamina*:          float
     focus*:            float   ## casting resource; spent on spells
@@ -160,7 +159,6 @@ proc initPlayerState*(): PlayerState =
   result.lastRestPosition  = (0, 0)
   result.lastRestRoom      = ""
   result.tick              = 0
-  result.gold              = 0
   result.health            = 100.0
   result.stamina           = 100.0
   result.focus             = 50.0

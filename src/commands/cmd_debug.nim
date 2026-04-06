@@ -112,7 +112,7 @@ proc cmdDbState(state: var GameState; args: seq[string]): CmdResult =
   lines.add &"  lastRestPosition:   ({p.lastRestPosition[0]}, {p.lastRestPosition[1]})"
   lines.add &"  lastRestRoom:       {p.lastRestRoom}"
   lines.add &"  tick:               {p.tick}"
-  lines.add &"  gold:               {p.gold}"
+  lines.add &"  gold:               {countItem(state, \"currency\")}"
   lines.add &"  health:             {p.health:.1f} / {p.maxHealth:.1f}"
   lines.add &"  stamina:            {p.stamina:.1f} / {p.maxStamina:.1f}"
   lines.add &"  focus:              {p.focus:.1f} / {p.maxFocus:.1f}"

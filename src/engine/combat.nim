@@ -284,11 +284,11 @@ proc applyNemesis(state: var GameState; enemyId: string): string =
 proc playerDeath(state: var GameState; killerId: string): seq[string] =
   ## All on-death side-effects after "You have fallen." is already printed.
   let p = addr state.player
-  # Gold penalty
+  # Currency penalty
   let lossPct = gvFloat("death_gold_loss", 0.2)
-  let lost    = int(p.gold.float * lossPct)
+  let lost    = int(itms.countItem(state, "currency").float * lossPct)
   if lost > 0:
-    p.gold -= lost
+    for _ in 0 ..< lost: discard itms.takeItem(state, "currency")
     result.add &"You lost {lost} gold."
   # Nemesis
   if killerId != "":

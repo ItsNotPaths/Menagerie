@@ -15,6 +15,7 @@ import api
 import scripting
 import settings
 import saves
+import items
 import ../commands/core
 import ../commands/cmd_world
 import ../commands/cmd_town
@@ -42,7 +43,7 @@ proc buildStatLines(state: GameState): seq[string] =
   @[
     &"Day: {day}  {timeOfDay(state)}",
     &"Level: {p.level}",
-    &"Gold: {p.gold}",
+    &"Gold: {countItem(state, \"currency\")}",
     "=-=-=-=",
     &"HP: {p.health.int} / {p.maxHealth.int:>3} | {statBar(p.health, p.maxHealth)}",
     &"Stamina: {p.stamina.int} / {p.maxStamina.int:>3} | {statBar(p.stamina, p.maxStamina)}",

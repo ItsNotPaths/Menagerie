@@ -6,7 +6,7 @@
 ##
 ## 240 ticks = 1 day. 1 tick = 6 minutes.
 
-import std/[sequtils, strformat]
+import std/[sequtils, strformat, strutils, tables, json]
 import engine/state
 import engine/gameplay_vars
 
@@ -99,3 +99,13 @@ proc passTicks*(state: var GameState; n: int) =
   # NPC schedule reload if a slot boundary was crossed
   if (prev div scheduleSlot) != (state.player.tick div scheduleSlot):
     if onScheduleBoundary != nil: onScheduleBoundary(state)
+
+  # Bounty decay: small bounties (< 50) dwindle by 5 per day
+  if (prev div ticksPerDay) != (state.player.tick div ticksPerDay):
+    const decayThreshold = 50
+    const decayAmount    = 5
+    for key in toSeq(state.variables.keys):
+      if key.startsWith("bounty_"):
+        let val = state.variables[key].getInt(0)
+        if val > 0 and val < decayThreshold:
+          state.variables[key] = %(max(0, val - decayAmount))

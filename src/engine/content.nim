@@ -342,14 +342,26 @@ proc loadAssetIndex(dir: string) =
   if not fileExists(path): return
   let d = loadJson(path)
   if d.kind != JObject: return
-  if d.hasKey("files") and d["files"].kind == JObject:
-    for k, v in d["files"]: assetIndex.files[k] = v.getStr
+  for cat in ["files", "rooms", "tiles", "sprites"]:
+    if d.hasKey(cat) and d[cat].kind == JObject:
+      for k, v in d[cat]: assetIndex.files[k] = v.getStr
   if d.hasKey("scripts") and d["scripts"].kind == JObject:
     for k, v in d["scripts"]: assetIndex.scripts[k] = v.getStr
 
 
 # ── Startup ───────────────────────────────────────────────────────────────────
 # loadContent: called once from game_loop at launch. Never Lua-callable.
+
+proc generateCurrencyItem() =
+  ## Synthesise the currency item if it wasn't defined in content files.
+  if "currency" notin items:
+    items["currency"] = ItemDef(
+      id:          "currency",
+      displayName: "Gold",
+      itemType:    "currency",
+      slotCost:    0,
+      canEquip:    false,
+    )
 
 proc generateRoomKeys() =
   ## Synthesise a zero-slot key item for every room that has a lock schedule.
@@ -380,6 +392,7 @@ proc loadContent*(contentDir: string) =
   loadQuests(contentDir)
   loadWorldDef(contentDir)
   loadAssetIndex(contentDir)
+  generateCurrencyItem()
   generateRoomKeys()
   logInfo("content: loaded " &
     $items.len & " items, " &

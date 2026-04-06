@@ -11,6 +11,7 @@ import engine/gameplay_vars
 import engine/world
 import engine/saves
 import engine/skills
+import engine/items
 import engine/api
 import commands/core
 
@@ -63,9 +64,9 @@ proc cmdSleep(state: var GameState; args: seq[string]): CmdResult =
     return err("Usage: sleep <hours>")
   hours = max(1, min(hours, gvInt("wait_max_hours", 24)))
   let cost = gvInt("sleep_cost", 10)
-  if state.player.gold < cost:
-    return err(&"Sleeping here costs {cost} gold. You have {state.player.gold}.")
-  state.player.gold -= cost
+  if countItem(state, "currency") < cost:
+    return err(&"Sleeping here costs {cost} gold. You have {countItem(state, \"currency\")}.")
+  for _ in 0 ..< cost: discard takeItem(state, "currency")
   state.player.lastRestPosition = state.player.position
   state.player.lastRestRoom     = state.player.currentRoom
   saves.flushPlayer(state)
@@ -82,7 +83,7 @@ proc cmdStatus(state: var GameState; args: seq[string]): CmdResult =
     &"Day {day}  {timeOfDay(state)}",
     &"  Level    {p.level}  ({p.xp:.0f} XP)",
     &"  Health   {p.health:.0f}    Stamina  {p.stamina:.0f}    Focus  {p.focus:.0f}",
-    &"  Gold     {p.gold}       Hunger   {p.hunger:.0f}",
+    &"  Gold     {countItem(state, \"currency\")}       Hunger   {p.hunger:.0f}",
   )
 
 

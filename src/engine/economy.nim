@@ -53,6 +53,12 @@ proc activeEvent(state: var GameState): JsonNode =
     return newJNull()
   ev
 
+proc calcBuyCost(state: GameState; baseCost: int): int =
+  ## Apply mercantile skill and buy_price_pct modifier to a base shop cost.
+  let mercPct = sk.skillPct(state, "mercantile")
+  result = max(1, int(round(baseCost.float * (1.5 - mercPct * 0.5))))
+  result = max(1, int(round(result.float * mods.modifierGet(state, "buy_price_pct"))))
+
 proc adjustedCost(state: var GameState; itemId: string; baseCost: int): int =
   ## Scale buy price by the active economic event if the item's tags match.
   let ev = activeEvent(state)
@@ -131,7 +137,7 @@ proc shopCategoryLines*(state: GameState; category: string): seq[string] =
     if itemType(itemId) != category.toLowerAscii: continue
     let amount  = trade{"receive_amount"}.getInt(1)
     let curId   = trade{"currency_item"}.getStr(currencyId)
-    let cost    = trade{"cost"}.getInt(1)
+    let cost    = calcBuyCost(state, trade{"cost"}.getInt(1))
     let qty     = if amount != 1: &"{amount}x " else: ""
     lines.add &"  [[{qty}{itemDisplay(itemId)} -- {cost} {itemDisplay(curId)}:buy {itemId}]]"
 
@@ -161,11 +167,7 @@ proc buyTrade*(state: var GameState; itemId: string): seq[string] =
   let baseCost = tradeNode{"cost"}.getInt(1)
   let rAmt     = tradeNode{"receive_amount"}.getInt(1)
 
-  # Mercantile skill reduces buy price (1.5x at 0, 1.0x at 100)
-  let mercPct = sk.skillPct(state, "mercantile")
-  var cost    = max(1, int(round(baseCost.float * (1.5 - mercPct * 0.5))))
-  # modifier: "buy_price_pct" — negative = cheaper
-  cost = max(1, int(round(cost.float * mods.modifierGet(state, "buy_price_pct"))))
+  var cost = calcBuyCost(state, baseCost)
 
   if countItem(state, curId) < cost:
     return @[&"You need {cost} {itemDisplay(curId)}."]
