@@ -8,11 +8,12 @@ IMAGE_NAME="menagerie-linux-build"
 # ── Usage ─────────────────────────────────────────────────────────────────────
 
 usage() {
-    echo "Usage: build.sh [--game] [--manager] [--tools]"
+    echo "Usage: build.sh [--game] [--manager] [--tools] [--files]"
     echo ""
     echo "  --game     Compile the game binary, verify deps, copy to release dir"
     echo "  --manager  Compile the mod manager, place it in the project root"
     echo "  --tools    Compile world tools editor → world-tools/world_tools"
+    echo "  --files    Copy README files to release dir and clear game.log"
     echo ""
     echo "Flags are composable: build.sh --game --manager"
 }
@@ -22,6 +23,7 @@ usage() {
 BUILD_GAME=false
 BUILD_MANAGER=false
 BUILD_TOOLS=false
+COPY_FILES=false
 
 if [[ $# -eq 0 ]]; then
     usage
@@ -33,6 +35,7 @@ for arg in "$@"; do
         --game)    BUILD_GAME=true ;;
         --manager) BUILD_MANAGER=true ;;
         --tools)   BUILD_TOOLS=true ;;
+        --files)   COPY_FILES=true ;;
         --help|-h) usage; exit 0 ;;
         *)
             echo "Unknown flag: $arg"
@@ -44,7 +47,7 @@ done
 
   # no early-out; handled below
 
-if ! $BUILD_GAME && ! $BUILD_MANAGER && ! $BUILD_TOOLS; then
+if ! $BUILD_GAME && ! $BUILD_MANAGER && ! $BUILD_TOOLS && ! $COPY_FILES; then
     echo "Nothing to build."
     exit 0
 fi
@@ -53,11 +56,13 @@ fi
 # Build context is the project root so COPY can reach vendor/.
 # Layer caching means this is fast on subsequent runs.
 
-echo "==> Building Docker image (cached layers reused if unchanged)..."
-docker build \
-    -f "$PROJECT_DIR/docker-build/Dockerfile" \
-    -t "$IMAGE_NAME" \
-    "$PROJECT_DIR"
+if $BUILD_GAME || $BUILD_MANAGER || $BUILD_TOOLS; then
+    echo "==> Building Docker image (cached layers reused if unchanged)..."
+    docker build \
+        -f "$PROJECT_DIR/docker-build/Dockerfile" \
+        -t "$IMAGE_NAME" \
+        "$PROJECT_DIR"
+fi
 
 # ── Helper: fix ownership after container run ─────────────────────────────────
 # Containers run as root; the output file comes out owned by root.
@@ -156,6 +161,25 @@ if $BUILD_TOOLS; then
     echo "==> [tools] Done: $RELEASE_DIR/world-tools/world_tools"
 fi
 
+# ── --files ───────────────────────────────────────────────────────────────────
+
+if $COPY_FILES; then
+    echo "==> [files] Copying READMEs to release directory..."
+    mkdir -p "$RELEASE_DIR"
+    for f in "$PROJECT_DIR"/README*.md; do
+        cp "$f" "$RELEASE_DIR/"
+        echo "       copied: $(basename "$f")"
+    done
+
+    echo "==> [files] Clearing game.log..."
+    > "$RELEASE_DIR/game.log"
+
+    echo "==> [files] Removing saves and content directories..."
+    rm -rf "$RELEASE_DIR/saves" "$RELEASE_DIR/content"
+
+    echo "==> [files] Done."
+fi
+
 # ── Summary ───────────────────────────────────────────────────────────────────
 
 echo ""
@@ -163,3 +187,4 @@ echo "Build complete."
 $BUILD_GAME    && echo "  game:    $RELEASE_DIR/menagerie"
 $BUILD_MANAGER && echo "  manager: $RELEASE_DIR/mod_manager"
 $BUILD_TOOLS   && echo "  tools:   $RELEASE_DIR/world-tools/world_tools"
+$COPY_FILES    && echo "  files:   READMEs copied, game.log cleared"
