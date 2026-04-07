@@ -80,6 +80,12 @@ type
     id*:  string
     raw*: JsonNode   ## items array: [{currency_item, cost, receive_item, receive_amount}]
 
+  EconomicEventDef* = object
+    id*:          string
+    tag*:         string   ## item tag this event targets
+    fluctuation*: float    ## price multiplier delta (-1.0 to 1.0)
+    tickScope*:   int      ## duration in ticks
+
   AiPackageDef* = object
     id*:  string
     raw*: JsonNode   ## action_tables array
@@ -125,8 +131,9 @@ var
   encounters*:  Table[string, EncounterDef]
   tilesDefs*:   Table[string, TileDef]
   armorPlates*: Table[string, ArmorPlateDef]
-  shops*:       Table[string, ShopDef]
-  aiPackages*:  Table[string, AiPackageDef]
+  shops*:          Table[string, ShopDef]
+  economicEvents*: Table[string, EconomicEventDef]
+  aiPackages*:     Table[string, AiPackageDef]
   quests*:      Table[string, QuestDef]
   worldDef*:    WorldDef
   assetIndex*:  AssetIndex
@@ -319,6 +326,19 @@ proc loadShops(dir: string) =
     if id == "": continue
     shops[id] = ShopDef(id: id, raw: d)
 
+proc loadEconomicEvents(dir: string) =
+  for f in walkFiles(dir / "economic_events/*.json"):
+    let d = loadJson(f)
+    if d.kind != JObject: continue
+    let id = d{"id"}.getStr
+    if id == "": continue
+    economicEvents[id] = EconomicEventDef(
+      id:          id,
+      tag:         d{"tag"}.getStr,
+      fluctuation: d{"fluctuation"}.getFloat(0.0),
+      tickScope:   d{"tick_scope"}.getInt(0),
+    )
+
 proc loadAiPackages(dir: string) =
   for f in walkFiles(dir / "ai_packages/*.json"):
     let d = loadJson(f)
@@ -341,7 +361,9 @@ proc loadQuests(dir: string) =
 
 proc loadWorldDef(dir: string) =
   let path = dir / "world/world_def.json"
-  if not fileExists(path): return
+  if not fileExists(path):
+    log(Game, Warn, "content: missing " & path)
+    return
   let d = loadJson(path)
   if d.kind != JObject: return
   worldDef.worldSeed = d{"world_seed"}.getInt(0)
@@ -362,7 +384,9 @@ proc loadWorldDef(dir: string) =
 
 proc loadAssetIndex(dir: string) =
   let path = dir / "asset_index.json"
-  if not fileExists(path): return
+  if not fileExists(path):
+    log(Game, Warn, "content: missing " & path)
+    return
   let d = loadJson(path)
   if d.kind != JObject: return
   for cat in ["files", "rooms", "tiles", "sprites"]:
@@ -399,6 +423,17 @@ proc buildCraftingIndex() =
 
 proc loadContent*(contentDir: string) =
   ## Load all content from contentDir at startup. Call once before game loop.
+  if not dirExists(contentDir):
+    log(Game, Error, "content: directory not found: " & contentDir)
+    return
+
+  const subdirs = ["items", "spells", "effects", "npcs", "rooms",
+                   "encounters", "tiles", "armor_plates", "shops",
+                   "economic_events", "ai_packages", "quests", "world"]
+  for sub in subdirs:
+    if not dirExists(contentDir / sub):
+      log(Game, Warn, "content: missing subdirectory: " & contentDir / sub)
+
   loadItems(contentDir)
   loadSpells(contentDir)
   loadEffects(contentDir)
@@ -408,6 +443,7 @@ proc loadContent*(contentDir: string) =
   loadTiles(contentDir)
   loadArmorPlates(contentDir)
   loadShops(contentDir)
+  loadEconomicEvents(contentDir)
   loadAiPackages(contentDir)
   loadQuests(contentDir)
   loadWorldDef(contentDir)
@@ -424,6 +460,7 @@ proc loadContent*(contentDir: string) =
     $tilesDefs.len & " tile defs, " &
     $armorPlates.len & " armor plates, " &
     $shops.len & " shops, " &
+    $economicEvents.len & " economic events, " &
     $aiPackages.len & " ai packages, " &
     $quests.len & " quests, " &
     $worldDef.tiles.len & " world tiles")

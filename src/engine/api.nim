@@ -32,9 +32,10 @@
 ##   journal_append <text...>                     append line to last journal page
 ##   pause                                        injects __PAUSE__ sentinel
 ##   open_dialogue <npc_id>                       start dialogue with an NPC
-##   open_shop     <shop_id>                      open a shop by id
-##   buy           <item_id>                      buy from the active shop
-##   sell          <item_id>                      sell an item from inventory
+##   open_shop       <shop_id>                    open a shop by id
+##   buy             <item_id>                    buy from the active shop
+##   sell            <item_id>                    sell an item from inventory
+##   economic_event  <event_id> [replace|extend]  activate or update an economic event
 
 import std/[json, options, strformat, strutils, sequtils, tables]
 import state, content, items, api_types, scripting
@@ -461,6 +462,15 @@ proc runCommand*(state: var GameState; cmd: string;
     # sell <item_id>
     if parts.len < 2: return
     return econ.sellItem(state, parts[1])
+
+  of "economic_event":
+    # economic_event <event_id> [replace|extend]
+    if parts.len < 2: return
+    let mode = if parts.len > 2 and parts[2].toLowerAscii == "extend":
+                 econ.eemExtend
+               else:
+                 econ.eemReplace
+    econ.applyEconomicEvent(state, parts[1], mode)
 
   of "cast", "cast_spell":
     # Fire a spell inline from a content proc (armor proc, effect command, etc.).

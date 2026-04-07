@@ -53,5 +53,5 @@ proc log*(target: LogTarget; level: LogLevel; msg: string) {.gcsafe.} =
         gLines[target] = gLines[target][gLines[target].len - MaxLines .. ^1]
       try:
         writeFile(gPaths[target], gLines[target].join("\n") & "\n")
-      except CatchableError:
-        discard   # nowhere useful to report a log-write failure
+      except CatchableError as e:
+        stderr.writeLine("log write failed (" & gPaths[target] & "): " & e.msg)

@@ -41,17 +41,25 @@ proc itemValue(itemId: string): int =
   0
 
 
+type EconEventMode* = enum
+  eemReplace  ## restart the matching event's timer from now
+  eemExtend   ## add the new tick_scope to the matching event's remaining ticks
+
+
 # ── Economic event helpers ────────────────────────────────────────────────────
 
-proc activeEvent(state: var GameState): JsonNode =
-  ## Return the active economic event if still within its tick_scope, else expire it.
-  let ev = state.variables.getOrDefault("_active_economic_event", newJNull())
-  if ev.kind != JObject: return newJNull()
-  let elapsed = state.player.tick - ev{"tick_start"}.getInt(0)
-  if elapsed >= ev{"tick_scope"}.getInt(0):
-    state.variables.del("_active_economic_event")
-    return newJNull()
-  ev
+proc activeEvents(state: var GameState): JsonNode =
+  ## Return the list of active economic events, lazily expiring any that have
+  ## exceeded their tick_scope.  Always returns a JArray (possibly empty).
+  var evList = state.variables.getOrDefault("_active_economic_events", newJArray())
+  if evList.kind != JArray: evList = newJArray()
+  var kept = newJArray()
+  for ev in evList:
+    let elapsed = state.player.tick - ev{"tick_start"}.getInt(0)
+    if elapsed < ev{"tick_scope"}.getInt(0):
+      kept.add ev
+  state.variables["_active_economic_events"] = kept
+  kept
 
 proc calcBuyCost(state: GameState; baseCost: int): int =
   ## Apply mercantile skill and buy_price_pct modifier to a base shop cost.
@@ -66,17 +74,61 @@ proc calcSellValue(state: GameState; baseVal: int): int =
   result = max(1, int(round(result.float * mods.modifierGet(state, "sell_price_pct"))))
 
 proc adjustedCost(state: var GameState; itemId: string; baseCost: int): int =
-  ## Scale buy price by the active economic event if the item's tags match.
-  let ev = activeEvent(state)
-  if ev.kind != JObject: return baseCost
-  let itemNode = state.variables.getOrDefault("__dummy", newJNull())   # unused
-  var tags: seq[string]
+  ## Scale buy price by all active economic events whose tag matches an item tag.
+  ## Each matching event's fluctuation is applied multiplicatively.
+  let evList = activeEvents(state)
+  if evList.len == 0: return baseCost
+  var itemTags: seq[string]
   if itemId in content.items:
-    let raw = content.items[itemId]
-    discard raw   # tags not in typed ItemDef — check raw JSON not available here
-    # economic events require item tags which are not stored in typed content;
-    # fall back to base cost (events not yet authored in content)
-  baseCost
+    itemTags.add content.items[itemId].itemType.toLowerAscii
+  ## also check typed event def for tag matching
+  var cost = baseCost.float
+  for ev in evList:
+    let evId  = ev{"id"}.getStr
+    let evTag = ev{"tag"}.getStr
+    if evTag == "": continue
+    let matched =
+      if evId in content.economicEvents:
+        content.economicEvents[evId].tag in itemTags
+      else:
+        evTag in itemTags
+    if matched:
+      cost = cost * (1.0 + ev{"fluctuation"}.getFloat(0.0))
+  max(1, int(round(cost)))
+
+
+proc applyEconomicEvent*(state: var GameState; eventId: string;
+                         mode: EconEventMode = eemReplace) =
+  ## Activate an economic event by id.  If an event with the same id is already
+  ## active, `mode` determines what happens:
+  ##   eemReplace — restart its timer (tick_start = now, tick_scope unchanged)
+  ##   eemExtend  — add the event's tick_scope to its remaining ticks
+  if eventId notin content.economicEvents: return
+  let def  = content.economicEvents[eventId]
+  let evList = activeEvents(state)   # also flushes expired entries
+  ## Check if this event is already running
+  for i in 0 ..< evList.len:
+    if evList[i]{"id"}.getStr == eventId:
+      case mode
+      of eemReplace:
+        evList[i]["tick_start"] = %state.player.tick
+      of eemExtend:
+        let remaining = evList[i]{"tick_scope"}.getInt(0) -
+                        (state.player.tick - evList[i]{"tick_start"}.getInt(0))
+        evList[i]["tick_start"] = %state.player.tick
+        evList[i]["tick_scope"] = %(max(0, remaining) + def.tickScope)
+      state.variables["_active_economic_events"] = evList
+      return
+  ## Not already active — append a new entry
+  let entry = %*{
+    "id":          eventId,
+    "tag":         def.tag,
+    "fluctuation": def.fluctuation,
+    "tick_scope":  def.tickScope,
+    "tick_start":  state.player.tick,
+  }
+  evList.add entry
+  state.variables["_active_economic_events"] = evList
 
 
 # ── Script API ────────────────────────────────────────────────────────────────

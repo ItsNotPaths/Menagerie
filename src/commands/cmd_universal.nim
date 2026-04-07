@@ -72,6 +72,11 @@ proc cmdSleep(state: var GameState; args: seq[string]): CmdResult =
   saves.flushPlayer(state)
   let restorePH = gvFloat("fatigue_sleep_restore_per_hour", 60.0)
   state.player.fatigue = min(100.0, state.player.fatigue + float(hours) * restorePH)
+  let healthBonusPH  = gvFloat("health_sleep_regen_per_hour", 5.0)
+  let hungerFactor   = min(1.0, state.player.hunger / 80.0)
+  let sleepHealthRegen = float(hours) * healthBonusPH * hungerFactor
+  state.player.health = min(state.player.maxHealth,
+      state.player.health + sleepHealthRegen)
   let suf = if hours == 1: "" else: "s"
   okTicks(hours * ticksPerHour, &"You pay {cost} gold and sleep for {hours} hour{suf}.")
 

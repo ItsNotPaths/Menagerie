@@ -82,6 +82,13 @@ proc passTicks*(state: var GameState; n: int) =
   let hungerRate = gvFloat("hunger_drain_per_tick", hungerMax / float(ticksPerDay))
   state.player.hunger = max(0.0, state.player.hunger - hungerRate * float(n))
 
+  # Health regen (hunger-scaled: full rate at hunger >= 80, zero at hunger 0)
+  let healthRate   = gvFloat("health_regen_per_tick", 1.0)
+  let hungerFactor = min(1.0, state.player.hunger / 80.0)
+  let healthCap    = effectiveStatCap(state, state.player.maxHealth)
+  state.player.health = min(healthCap,
+      state.player.health + healthRate * hungerFactor * float(n))
+
   # Stamina regen
   let stamRate = gvFloat("player_regen_stamina", 20.0)
   let stamCap  = effectiveStatCap(state, state.player.maxStamina)
