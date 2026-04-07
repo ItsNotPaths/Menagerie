@@ -23,3 +23,6 @@ menagerie.exe
 
 # optimizer script for release png's
 optimize.sh
+
+# graphify
+graphify-out/
