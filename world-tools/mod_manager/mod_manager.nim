@@ -17,6 +17,7 @@ import plugin_db
 import lua_runner
 import assets_tab
 import "../theme"
+import "../../src/engine/log"
 
 # ── Layout constants (mod_manager specific) ───────────────────────────────────
 
@@ -299,6 +300,7 @@ proc loadModpack(app: var App) =
   if app.modpacks.len == 0:
     app.status   = "No modpacks found in " & app.dataDir
     app.statusOk = false
+    log(Manager, Error, app.status)
     return
   let mp = app.modpacks[app.modpackIdx]
   app.db = scan(app.dataDir / mp)
@@ -321,13 +323,15 @@ proc flushStatus(app: var App; msg: string; ok: bool = true) =
 proc exportAssets(app: var App) =
   let luaPath = app.driversDir / "assets" / "assets.lua"
   if not fileExists(luaPath):
-    app.status = "Assets driver not found"; app.statusOk = false; return
+    app.status = "Assets driver not found"; app.statusOk = false
+    log(Manager, Error, app.status & ": " & luaPath); return
 
   var ds: DriverState
   ds.init()
   defer: ds.close()
   if not ds.loadDriver(luaPath):
-    app.status = "Failed to load assets driver"; app.statusOk = false; return
+    app.status = "Failed to load assets driver"; app.statusOk = false
+    log(Manager, Error, app.status & ": " & luaPath); return
 
   var folders: seq[string]
   for tid in TOOL_IDS:
@@ -336,7 +340,9 @@ proc exportAssets(app: var App) =
 
   createDir(app.contentDir)
   let n = ds.runAssetExport(folders, app.contentDir)
-  if n < 0: app.status = "Assets export failed";            app.statusOk = false
+  if n < 0:
+    app.status = "Assets export failed"; app.statusOk = false
+    log(Manager, Error, app.status)
   else:     app.status = fmt"Assets: mapped {n} file(s)";   app.statusOk = true
 
 proc exportTab(app: var App; tabIdx: int) =
@@ -351,17 +357,21 @@ proc exportTab(app: var App; tabIdx: int) =
   app.flushStatus("Exporting " & t.label & "…")
   let luaPath = app.driversDir / t.driver / (t.driver & ".lua")
   if not fileExists(luaPath):
-    app.status = "Driver not found: " & luaPath; app.statusOk = false; return
+    app.status = "Driver not found: " & luaPath; app.statusOk = false
+    log(Manager, Error, app.status); return
 
   var ds: DriverState
   ds.init()
   defer: ds.close()
   if not ds.loadDriver(luaPath):
-    app.status = "Failed to load driver: " & t.driver; app.statusOk = false; return
+    app.status = "Failed to load driver: " & t.driver; app.statusOk = false
+    log(Manager, Error, app.status); return
 
   createDir(app.contentDir)
   let n = ds.runExport(app.db.enabledPlugins(t.toolId), app.contentDir)
-  if n < 0: app.status = fmt"[{t.label}] export failed";          app.statusOk = false
+  if n < 0:
+    app.status = fmt"[{t.label}] export failed"; app.statusOk = false
+    log(Manager, Error, app.status)
   else:     app.status = fmt"[{t.label}] exported {n} file(s)";   app.statusOk = true
 
 proc exportAll(app: var App) =
@@ -374,15 +384,22 @@ proc exportAll(app: var App) =
     if not fileExists(luaPath): continue
     var ds: DriverState
     ds.init()
-    if not ds.loadDriver(luaPath): ds.close(); failed = true; continue
+    if not ds.loadDriver(luaPath):
+      ds.close(); failed = true
+      log(Manager, Error, "exportAll: failed to load driver: " & luaPath); continue
     createDir(app.contentDir)
     let n = ds.runExport(app.db.enabledPlugins(TABS[i].toolId), app.contentDir)
     ds.close()
-    if n >= 0: total += n else: failed = true
+    if n >= 0: total += n
+    else:
+      failed = true
+      log(Manager, Error, "exportAll: driver export failed: " & TABS[i].driver)
   app.exportAssets()
   if not app.statusOk: failed = true
   else: app.assetsTab.rebuildVFS(app.db)
-  if failed: app.status = fmt"Done with errors — {total} file(s)"; app.statusOk = false
+  if failed:
+    app.status = fmt"Done with errors — {total} file(s)"; app.statusOk = false
+    log(Manager, Error, app.status)
   else:      app.status = fmt"Export complete — {total} file(s)";  app.statusOk = true
 
 # ── Event handling ────────────────────────────────────────────────────────────
@@ -480,6 +497,7 @@ proc main() =
 
   var app: App
   app.rootDir    = getAppDir()
+  openLog(Manager, app.rootDir)
   app.driversDir = app.rootDir / "world-tools" / "drivers"
   app.dataDir    = app.rootDir / "data"
   app.contentDir = app.rootDir / "content"

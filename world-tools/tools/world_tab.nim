@@ -6,6 +6,7 @@ import sdl2
 import sdl2/ttf
 import std/[json, tables, strformat, math, os, strutils, algorithm, sets]
 import "../theme"
+import "../../src/engine/log"
 import plugin_meta
 import plugin_io
 import world_data
@@ -426,12 +427,7 @@ proc processFormResults(wt: var WorldTab) =
         let warns = wt.tileForm.warnMsgs.join("; ")
         wt.statusMsg = fmt"Unsaved — link warnings: {warns}"
         wt.statusOk  = false
-        try:
-          let logPath = wt.modpackDir / "tools.log"
-          let f = open(logPath, fmAppend)
-          f.writeLine(fmt"[world tile ({entry.x},{entry.y})] {warns}")
-          f.close()
-        except: discard
+        log(Tools, Warn, fmt"world tile ({entry.x},{entry.y}): {warns}")
       else:
         wt.statusMsg = "Unsaved changes"
         wt.statusOk  = true

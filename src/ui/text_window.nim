@@ -131,7 +131,7 @@ type
 # ─── SDL helpers ─────────────────────────────────────────────────────────────
 template sdlCheck(call: untyped) =
   if not call:
-    logError("SDL error: " & $getError())
+    log(Game, Error, "SDL error: " & $getError())
     quit(1)
 
 proc setColor(ren: RendererPtr; c: tuple[r,g,b,a: uint8]) =
@@ -439,7 +439,7 @@ proc loadBgImage(app: var App; path: string) =
     app.bgTex = nil
   let surf = image.load(path.cstring)
   if surf.isNil:
-    logError("Image load failed: " & path & " — " & $getError())
+    log(Game, Error, "Image load failed: " & path & " — " & $getError())
     return
   app.bgW = surf.w.int
   app.bgH = surf.h.int

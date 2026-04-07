@@ -11,6 +11,6 @@ proc findContentDir(): string =
   if dirExists(cwd): return cwd
   quit("Cannot find content/ directory.", 1)
 
-openLog(getAppDir())
+openLog(Game, getAppDir())
 startGameThread(findContentDir())
 main()

@@ -8,6 +8,7 @@
 import std/[json, os, tables, sequtils, strutils]
 import plugin_meta
 import load_order
+import "../../src/engine/log"
 
 type
   PluginEntry* = object
@@ -50,7 +51,9 @@ proc scanModpack*(modpackDir, toolId: string): seq[PluginEntry] =
 proc loadPluginJson*(path: string): JsonNode =
   ## Parse a plugin file; returns nil on error.
   try: result = parseFile(path)
-  except: result = nil
+  except:
+    log(Tools, Error, "loadPluginJson: failed to parse " & path)
+    result = nil
 
 proc savePluginJson*(path: string; j: JsonNode) =
   ## Write plugin JSON to path (creates parent dirs as needed).

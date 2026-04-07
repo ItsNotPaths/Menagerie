@@ -1,52 +1,57 @@
 ## engine/log.nim
 ## ───────────────
-## Rolling game log.  Writes INFO / WARN / ERROR lines to game.log next to the
-## binary, keeping at most 1 000 lines (oldest are dropped first).
+## Rolling log supporting multiple targets, all written to <root>/logs/.
+## Each target is opened independently with openLog(target, rootDir).
 ##
-## Call openLog(dir) once from the main thread before starting the game thread.
-## logInfo / logWarn / logError are safe to call from any thread.
+## Call openLog(target, rootDir) once before writing to that target.
+## log(target, level, msg) is safe to call from any thread.
 
 import std/[os, times, locks, strutils]
 
 const MaxLines = 1000
 
+type
+  LogTarget* = enum Game, Manager, Tools
+  LogLevel*  = enum Info, Warn, Error
+
 var
-  gLogPath = ""
-  gLines: seq[string]
+  gPaths: array[LogTarget, string]
+  gLines: array[LogTarget, seq[string]]
   gLock:  Lock
 
 initLock(gLock)
 
+const levelStr: array[LogLevel, string] = ["INFO", "WARN", "ERROR"]
+const fileNames: array[LogTarget, string] = ["game.log", "manager.log", "tools.log"]
 
-proc openLog*(dir: string) =
-  ## Initialise the log, loading and trimming any existing game.log in `dir`.
-  ## Call once from the main thread before spawning the game thread.
+
+proc openLog*(target: LogTarget; rootDir: string) =
+  ## Initialise a log target, writing to <rootDir>/logs/<name>.log.
+  ## Creates the logs/ directory if needed.
+  ## Call once from the main thread before writing to this target.
   {.cast(gcsafe).}:
     withLock gLock:
-      gLogPath = dir / "game.log"
-      if fileExists(gLogPath):
-        let raw = readFile(gLogPath).splitLines
-        gLines = if raw.len > 0 and raw[^1] == "": raw[0 ..< raw.len - 1]
-                 else: raw
-        if gLines.len > MaxLines:
-          gLines = gLines[gLines.len - MaxLines .. ^1]
+      let logsDir = rootDir / "logs"
+      createDir(logsDir)
+      gPaths[target] = logsDir / fileNames[target]
+      if fileExists(gPaths[target]):
+        let raw = readFile(gPaths[target]).splitLines
+        gLines[target] = if raw.len > 0 and raw[^1] == "": raw[0 ..< raw.len - 1]
+                         else: raw
+        if gLines[target].len > MaxLines:
+          gLines[target] = gLines[target][gLines[target].len - MaxLines .. ^1]
 
 
-proc writeLog(level, msg: string) {.gcsafe.} =
+proc log*(target: LogTarget; level: LogLevel; msg: string) {.gcsafe.} =
   let ts   = now().format("yyyy-MM-dd HH:mm:ss")
-  let line = "[" & ts & "] [" & level & "] " & msg
+  let line = "[" & ts & "] [" & levelStr[level] & "] " & msg
   {.cast(gcsafe).}:
     withLock gLock:
-      if gLogPath == "": return
-      gLines.add(line)
-      if gLines.len > MaxLines:
-        gLines = gLines[gLines.len - MaxLines .. ^1]
+      if gPaths[target] == "": return
+      gLines[target].add(line)
+      if gLines[target].len > MaxLines:
+        gLines[target] = gLines[target][gLines[target].len - MaxLines .. ^1]
       try:
-        writeFile(gLogPath, gLines.join("\n") & "\n")
+        writeFile(gPaths[target], gLines[target].join("\n") & "\n")
       except CatchableError:
         discard   # nowhere useful to report a log-write failure
-
-
-proc logInfo*(msg: string)  {.gcsafe.} = writeLog("INFO",  msg)
-proc logWarn*(msg: string)  {.gcsafe.} = writeLog("WARN",  msg)
-proc logError*(msg: string) {.gcsafe.} = writeLog("ERROR", msg)

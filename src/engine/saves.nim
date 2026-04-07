@@ -240,7 +240,7 @@ proc loadFromWorking(): GameState =
   result = initGameState()
   let pj = try: parseFile(workingDir / "player.json")
            except CatchableError as e:
-             logError("saves.loadFromWorking: cannot read player.json — " & e.msg)
+             log(Game, Error, "saves.loadFromWorking: cannot read player.json — " & e.msg)
              raise
   result.player = playerFromJson(pj)
 
@@ -249,14 +249,14 @@ proc loadFromWorking(): GameState =
     try:
       result.variables = jsonToTable(parseFile(vPath))
     except CatchableError as e:
-      logError("saves.loadFromWorking: malformed variables.json — " & e.msg)
+      log(Game, Error, "saves.loadFromWorking: malformed variables.json — " & e.msg)
 
   let nPath = workingDir / "npc_states.json"
   if fileExists(nPath):
     try:
       result.npcStates = jsonToTable(parseFile(nPath))
     except CatchableError as e:
-      logError("saves.loadFromWorking: malformed npc_states.json — " & e.msg)
+      log(Game, Error, "saves.loadFromWorking: malformed npc_states.json — " & e.msg)
 
   result.context = ctxWorld
 
@@ -299,7 +299,7 @@ proc loadDirtyTile*(state: var GameState; key: string): bool =
       state.dirty[key] = parseFile(path)
       return true
     except CatchableError as e:
-      logError("saves.loadDirtyTile: malformed " & path & " — " & e.msg)
+      log(Game, Error, "saves.loadDirtyTile: malformed " & path & " — " & e.msg)
   return false
 
 

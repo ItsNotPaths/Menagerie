@@ -122,7 +122,7 @@ proc luaPrintImpl(L: LuaStatePtr): cint {.cdecl.} =
   elif gEngine != nil and gEngine.onPrint != nil:
     gEngine.onPrint(msg)
   else:
-    logInfo("[lua] " & msg)
+    log(Game, Info, "[lua] " & msg)
   return 0
 
 proc luaEngineCmdImpl(L: LuaStatePtr): cint {.cdecl.} =

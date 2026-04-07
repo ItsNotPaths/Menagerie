@@ -17,12 +17,12 @@ var gvData: JsonNode = newJNull()
 proc loadGameplayVars*(contentDir: string) =
   let path = contentDir / "gameplay_vars.json"
   if not fileExists(path):
-    logWarn("gameplay_vars: file not found at " & path & " (using hardcoded defaults)")
+    log(Game, Warn, "gameplay_vars: file not found at " & path & " (using hardcoded defaults)")
     return
   try:
     gvData = parseFile(path)
   except CatchableError as e:
-    logError("gameplay_vars: malformed " & path & " — " & e.msg & " (using hardcoded defaults)")
+    log(Game, Error, "gameplay_vars: malformed " & path & " — " & e.msg & " (using hardcoded defaults)")
     gvData = newJNull()
 
 proc gvFloat*(key: string; default: float): float =

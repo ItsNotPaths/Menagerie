@@ -7,6 +7,7 @@ import sdl2
 import sdl2/ttf
 import std/[strformat, strutils, sequtils, json, os]
 import "../theme"
+import "../../src/engine/log"
 import plugin_meta
 import plugin_io
 import load_order
@@ -133,6 +134,7 @@ proc createPlugin(sb: var Sidebar) =
   except:
     sb.statusMsg = "Failed to write plugin file"
     sb.statusOk  = false
+    log(Tools, Error, "createPlugin: failed to write " & path)
     return
 
   # Reload and select the new entry

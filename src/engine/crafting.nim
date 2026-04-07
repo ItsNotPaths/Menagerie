@@ -90,7 +90,6 @@ proc craftInfoLines*(state: GameState; stationTag, itemId: string): seq[string] 
       result.add &"  {label} ×{need}  {status}"
   result.add ""
   result.add &"  [[Craft:craft_do {stationTag} {itemId}]]"
-  result.add &"  [[Back:craft {stationTag}]]"
 
 
 proc doCraft*(state: var GameState; stationTag, itemId: string): seq[string] =

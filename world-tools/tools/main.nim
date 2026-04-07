@@ -6,6 +6,7 @@ import sdl2
 import sdl2/ttf
 import std/[os, json, algorithm]
 import "../theme"
+import "../../src/engine/log"
 import plugin_sidebar
 import world_tab
 import rooms_tab
@@ -444,6 +445,7 @@ proc main() =
   defer: ttfQuit()
 
   var app: App
+  openLog(Tools, normalizedPath(getAppDir() / ".."))
   app.cfg       = loadConfig()
   app.activeTab = app.cfg.activeTab.clamp(0, TABS.len - 1)
 

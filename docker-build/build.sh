@@ -8,12 +8,14 @@ IMAGE_NAME="menagerie-linux-build"
 # ── Usage ─────────────────────────────────────────────────────────────────────
 
 usage() {
-    echo "Usage: build.sh [--game] [--manager] [--tools] [--files]"
+    echo "Usage: build.sh [--game] [--manager] [--tools] [--files] [--all] [--release]"
     echo ""
     echo "  --game     Compile the game binary, verify deps, copy to release dir"
     echo "  --manager  Compile the mod manager, place it in the project root"
     echo "  --tools    Compile world tools editor → world-tools/world_tools"
-    echo "  --files    Copy README files to release dir and clear game.log"
+    echo "  --files    Copy README files to release dir and clear logs/"
+    echo "  --all      Build all three executables (game, manager, tools)"
+    echo "  --release  Build all three executables then run --files"
     echo ""
     echo "Flags are composable: build.sh --game --manager"
 }
@@ -36,6 +38,8 @@ for arg in "$@"; do
         --manager) BUILD_MANAGER=true ;;
         --tools)   BUILD_TOOLS=true ;;
         --files)   COPY_FILES=true ;;
+        --all)     BUILD_GAME=true; BUILD_MANAGER=true; BUILD_TOOLS=true ;;
+        --release) BUILD_GAME=true; BUILD_MANAGER=true; BUILD_TOOLS=true; COPY_FILES=true ;;
         --help|-h) usage; exit 0 ;;
         *)
             echo "Unknown flag: $arg"
@@ -172,11 +176,17 @@ if $COPY_FILES; then
         echo "       copied: $(basename "$f")"
     done
 
-    echo "==> [files] Clearing game.log..."
-    > "$RELEASE_DIR/game.log"
+    echo "==> [files] Clearing logs/..."
+    mkdir -p "$RELEASE_DIR/logs"
+    > "$RELEASE_DIR/logs/game.log"
+    > "$RELEASE_DIR/logs/manager.log"
+    > "$RELEASE_DIR/logs/tools.log"
 
     echo "==> [files] Removing saves and content directories..."
     rm -rf "$RELEASE_DIR/saves" "$RELEASE_DIR/content"
+
+    echo "==> [files] Clearing world-tools config..."
+    rm -f "$RELEASE_DIR/world-tools/world_tools_config.json"
 
     echo "==> [files] Done."
 fi

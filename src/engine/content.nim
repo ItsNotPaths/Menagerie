@@ -142,7 +142,7 @@ proc loadJson(path: string): JsonNode =
   try:
     result = parseFile(path)
   except CatchableError as e:
-    logError("content: failed to parse " & path & " — " & e.msg)
+    log(Game, Error, "content: failed to parse " & path & " — " & e.msg)
     result = newJNull()
 
 
@@ -414,7 +414,7 @@ proc loadContent*(contentDir: string) =
   loadAssetIndex(contentDir)
   generateRoomKeys()
   buildCraftingIndex()
-  logInfo("content: loaded " &
+  log(Game, Info, "content: loaded " &
     $items.len & " items, " &
     $spells.len & " spells, " &
     $effects.len & " effects, " &
@@ -436,7 +436,7 @@ proc loadContent*(contentDir: string) =
 proc getItem*(id: string): ItemDef =
   if id in items: items[id]
   else:
-    logWarn("content: item not found: " & id)
+    log(Game, Warn, "content: item not found: " & id)
     ItemDef(id: id)
 
 proc getCraftingItems*(station: string): seq[string] =
@@ -446,25 +446,25 @@ proc getCraftingItems*(station: string): seq[string] =
 proc getSpell*(id: string): SpellDef =
   if id in spells: spells[id]
   else:
-    logWarn("content: spell not found: " & id)
+    log(Game, Warn, "content: spell not found: " & id)
     SpellDef(id: id)
 
 proc getEffect*(id: string): EffectDef =
   if id in effects: effects[id]
   else:
-    logWarn("content: effect not found: " & id)
+    log(Game, Warn, "content: effect not found: " & id)
     EffectDef(id: id)
 
 proc getNpc*(id: string): NpcDef =
   if id in npcs: npcs[id]
   else:
-    logWarn("content: npc not found: " & id)
+    log(Game, Warn, "content: npc not found: " & id)
     NpcDef(id: id)
 
 proc getRoom*(id: string): RoomDef =
   if id in rooms: rooms[id]
   else:
-    logWarn("content: room not found: " & id)
+    log(Game, Warn, "content: room not found: " & id)
     RoomDef(id: id)
 
 proc getEncounter*(id: string): EncounterDef =
@@ -474,7 +474,7 @@ proc getEncounter*(id: string): EncounterDef =
 proc getTileDef*(id: string): TileDef =
   if id in tilesDefs: tilesDefs[id]
   else:
-    logWarn("content: tile def not found: " & id)
+    log(Game, Warn, "content: tile def not found: " & id)
     TileDef(id: id)
 
 proc allRooms*(td: TileDef): seq[string] =
@@ -489,23 +489,23 @@ proc allRooms*(td: TileDef): seq[string] =
 proc getArmorPlate*(id: string): ArmorPlateDef =
   if id in armorPlates: armorPlates[id]
   else:
-    logWarn("content: armor plate not found: " & id)
+    log(Game, Warn, "content: armor plate not found: " & id)
     ArmorPlateDef(id: id)
 
 proc getShop*(id: string): ShopDef =
   if id in shops: shops[id]
   else:
-    logWarn("content: shop not found: " & id)
+    log(Game, Warn, "content: shop not found: " & id)
     ShopDef(id: id)
 
 proc getAiPackage*(id: string): AiPackageDef =
   if id in aiPackages: aiPackages[id]
   else:
-    logWarn("content: ai package not found: " & id)
+    log(Game, Warn, "content: ai package not found: " & id)
     AiPackageDef(id: id)
 
 proc getQuest*(id: string): QuestDef =
   if id in quests: quests[id]
   else:
-    logWarn("content: quest not found: " & id)
+    log(Game, Warn, "content: quest not found: " & id)
     QuestDef(id: id)
