@@ -606,9 +606,11 @@ Macro-economy events that modify shop buy prices for items matching a tag. Autho
 | `fluctuation` | Price multiplier delta, `-1.0` to `1.0`. Final price = `base × (1 + fluctuation)`, minimum 1 |
 | `tick_scope` | How many ticks the event remains active after it is triggered |
 
-Events are activated via the `economic_event` command (see Command API below) and stored in `state.variables["_active_economic_event"]` with `tick_start` stamped at activation. The event is automatically expired once `tick_scope` ticks have elapsed — this check happens lazily when a shop is browsed or a purchase is made.
+Events are activated via the `economic_event` command (see Command API below) and stored in `state.variables["_active_economic_events"]` with `tick_start` stamped at activation. Multiple events can be active simultaneously; their price effects apply multiplicatively. Events are automatically expired once `tick_scope` ticks have elapsed — this check happens lazily when a shop is browsed or a purchase is made.
 
-Only one event can be active at a time. Triggering a new event while one is active is a no-op unless `force` is passed.
+If an event with the same `id` is already active, the optional second argument controls the behaviour:
+- `replace` *(default)* — restarts the timer from now, keeping the original `tick_scope`
+- `extend` — adds the event's `tick_scope` to the remaining ticks
 
 ---
 
@@ -659,6 +661,7 @@ open_dialogue   <npc_id>
 open_shop       <shop_id>
 buy             <item_id>
 sell            <item_id>
+economic_event  <event_id> [replace|extend]
 ```
 
 **Script files** — any command entry ending in `.lua` is treated as a script filename and run through the Lua engine. Works in every command field (`tick_commands`, `on_apply_commands`, proc commands, event hook commands, etc.):
@@ -767,6 +770,13 @@ open_shop blacksmith
 ```
 buy iron-sword
 sell iron-sword
+```
+
+**`economic_event`** — activate an economic event by ID. If the event is already active, the optional second argument controls what happens to its timer (`replace` restarts it, `extend` adds to the remaining duration). Defaults to `replace`:
+```
+economic_event drought
+economic_event drought replace
+economic_event drought extend
 ```
 
 ---

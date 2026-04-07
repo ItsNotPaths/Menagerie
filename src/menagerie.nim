@@ -2,6 +2,7 @@ import std/os
 import engine/game_loop
 import engine/log
 import ui/text_window
+import ui/term_ui
 
 proc findContentDir(): string =
   ## content/ must sit next to the binary (release) or in CWD (dev).
@@ -13,6 +14,11 @@ proc findContentDir(): string =
       getAppDir() / "content" & ", " & getCurrentDir() / "content" & ")")
   quit("Cannot find content/ directory.", 1)
 
+let terminalMode = "-t" in commandLineParams()
+
 openLog(Game, getAppDir())
 startGameThread(findContentDir())
-main()
+if terminalMode:
+  termMain()
+else:
+  main()

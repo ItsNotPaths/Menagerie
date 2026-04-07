@@ -182,17 +182,22 @@ saves/working/           always current, written on the fly
 
 Economic events modify buy prices in shops for a duration.
 
-**Storage** — `state.variables["_active_economic_event"]` as a serialised dict:
+**Storage** — `state.variables["_active_economic_events"]` as a serialised `JArray` of dicts:
 ```
 id, tag, fluctuation, tick_scope, tick_start
 ```
-Stored in `variables.json` — persists automatically with the save system. Only one event active at a time.
+Stored in `variables.json` — persists automatically with the save system. Multiple events can be active simultaneously.
 
-**Activation** — `api.nim: applyEconomicEvent(state, eventId, force=false)`
+**Activation** — `economy.nim: applyEconomicEvent(state, eventId, mode: EconEventMode)`
 
-Loads `content/economic_events/{id}.json`, stamps `tick_start`. Silently no-ops if an event is active and `force=false`. Also reachable via command verb `economic_event <id> [force]`.
+Loads the `EconomicEventDef` from `content.economicEvents`, stamps `tick_start`, appends to the array. If an event with the same `id` is already active, `mode` controls the behaviour:
 
-**Price application** — `economy.nim: adjustedCost(state, itemId, baseCost)` — checks for active event, matches item `tags` list, returns `max(1, round(baseCost × (1 + fluctuation)))`. Sell prices not affected.
+- `eemReplace` — restarts the timer (`tick_start = now`, `tick_scope` unchanged)
+- `eemExtend` — adds the def's `tick_scope` to the event's remaining ticks
+
+Also reachable via command verb `economic_event <id> [replace|extend]` (defaults to `replace`).
+
+**Price application** — `economy.nim: adjustedCost(state, itemId, baseCost)` — calls `activeEvents` (which lazily flushes expired entries), then applies each matching event's `fluctuation` multiplicatively: `cost *= (1 + fluctuation)`. Returns `max(1, round(cost))`. Sell prices not affected.
 
 ---
 
