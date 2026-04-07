@@ -40,23 +40,6 @@ local function write_json(path, data)
     write_file(path, json_encode(data))
 end
 
--- ── Entry parser ─────────────────────────────────────────────────────────────
--- Plugin may store entries as {condition, room} objects (correct) or with the
--- full "condition: room" string in the room field and condition left empty.
--- This handles both forms.
-local function parse_entry(e)
-    local cond = trim(e.condition or "")
-    local room = trim(e.room or "")
-    if cond == "" then
-        local i = room:find(":", 1, true)
-        if i then
-            cond = trim(room:sub(1, i - 1))
-            room = trim(room:sub(i + 1))
-        end
-    end
-    return cond, room
-end
-
 -- ── Link parser ───────────────────────────────────────────────────────────────
 -- Accepts: "tag1 <> tag2"  (bidirectional, >< also valid)
 --          "tag1 > tag2"   (one-way)
@@ -149,10 +132,10 @@ function export(plugins, scripts_dir, output_dir, kwargs)
         for _, block in ipairs(blocks_data) do
             local out_entries = {}
             for _, e in ipairs(block.entries or {}) do
-                local cond, room = parse_entry(e)
+                local room = trim(e.room or "")
                 if room ~= "" then
                     out_entries[#out_entries+1] = {
-                        condition = cond,
+                        condition = trim(e.condition or ""),
                         room      = room,
                     }
                 end

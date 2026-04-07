@@ -128,14 +128,10 @@ proc tileFromJson(j: JsonNode): TileEntry =
         for t in bj["tags"]: b.tags.add t.getStr
       if bj.hasKey("entries") and bj["entries"].kind == JArray:
         for ej in bj["entries"]:
-          var cond = ej.getOrDefault("condition").getStr
-          var room = ej.getOrDefault("room").getStr
-          if cond == "":   # heal unsplit "condition: room" stored in room field
-            let i = room.find(':')
-            if i >= 0:
-              cond = room[0 ..< i].strip()
-              room = room[i + 1 .. ^1].strip()
-          b.entries.add RoomCondEntry(condition: cond, room: room)
+          b.entries.add RoomCondEntry(
+            condition: ej.getOrDefault("condition").getStr,
+            room:      ej.getOrDefault("room").getStr
+          )
       result.room_blocks.add b
   if j.hasKey("room_links") and j["room_links"].kind == JArray:
     for lnk in j["room_links"]: result.room_links.add lnk.getStr

@@ -6,7 +6,7 @@
 ## Call loadContent(contentDir) once before starting the game loop.
 ## contentDir is the path to the content/ directory.
 
-import std/[json, os, strutils, tables]
+import std/[json, os, tables]
 import log
 
 # ── Types ─────────────────────────────────────────────────────────────────────
@@ -280,14 +280,10 @@ proc loadTiles(dir: string) =
         let jentries = jb{"entries"}
         if jentries != nil and jentries.kind == JArray:
           for je in jentries:
-            var cond = je{"condition"}.getStr
-            var room = je{"room"}.getStr
-            if cond == "":   # heal unsplit "condition: room" in room field
-              let i = room.find(':')
-              if i >= 0:
-                cond = room[0 ..< i].strip()
-                room = room[i + 1 .. ^1].strip()
-            blk.entries.add TileBlockEntry(condition: cond, room: room)
+            blk.entries.add TileBlockEntry(
+              condition: je{"condition"}.getStr,
+              room:      je{"room"}.getStr,
+            )
         blocks.add blk
     tilesDefs[id] = TileDef(
       id:       id,
