@@ -8,7 +8,7 @@
 
   Output:
     <output_dir>/world/world_def.json      (tile coordinates, types, names)
-    <output_dir>/tiles/<tile_name>.json    (entry_room, room list, connections per named tile)
+    <output_dir>/tiles/<tile_name>.json    (entry_tag, blocks, connections per named tile)
 
   Injected globals (provided by mod manager Lua state):
     write_file(path, content), make_dirs(path),
@@ -20,9 +20,13 @@ NAME        = "World"
 DESCRIPTION = "World tile and location export driver"
 
 -- Editor-only fields stripped from world_def.json output
-local STRIP = { rooms=true, entry_room=true, global_npcs=true }
+local STRIP = { room_blocks=true, room_links=true, entry_tag=true, global_npcs=true }
 
 -- ── Helpers ───────────────────────────────────────────────────────────────────
+
+local function trim(s)
+    return (tostring(s):match("^%s*(.-)%s*$"))
+end
 
 local function J(...)
     local args = {...}
@@ -31,20 +35,56 @@ local function J(...)
     return r
 end
 
-local function trim(s)
-    return (tostring(s):match("^%s*(.-)%s*$"))
-end
-
 local function write_json(path, data)
     make_dirs(path_dirname(path))
     write_file(path, json_encode(data))
+end
+
+-- ── Entry parser ─────────────────────────────────────────────────────────────
+-- Plugin may store entries as {condition, room} objects (correct) or with the
+-- full "condition: room" string in the room field and condition left empty.
+-- This handles both forms.
+local function parse_entry(e)
+    local cond = trim(e.condition or "")
+    local room = trim(e.room or "")
+    if cond == "" then
+        local i = room:find(":", 1, true)
+        if i then
+            cond = trim(room:sub(1, i - 1))
+            room = trim(room:sub(i + 1))
+        end
+    end
+    return cond, room
+end
+
+-- ── Link parser ───────────────────────────────────────────────────────────────
+-- Accepts: "tag1 <> tag2"  (bidirectional, >< also valid)
+--          "tag1 > tag2"   (one-way)
+-- Returns: { a=string, b=string, bidir=bool } or nil on failure.
+local function parse_link(s)
+    s = trim(s)
+    if s == "" then return nil end
+    local bidir, sep_s, sep_e
+    sep_s, sep_e = s:find("<>", 1, true)
+    if not sep_s then sep_s, sep_e = s:find("><", 1, true) end
+    if sep_s then
+        bidir = true
+    else
+        sep_s, sep_e = s:find(">", 1, true)
+        bidir = false
+    end
+    if not sep_s then return nil end
+    local a = trim(s:sub(1, sep_s - 1))
+    local b = trim(s:sub(sep_e + 1))
+    if a == "" or b == "" then return nil end
+    return { a=a, b=b, bidir=bidir }
 end
 
 -- ── Export ────────────────────────────────────────────────────────────────────
 
 function export(plugins, scripts_dir, output_dir, kwargs)
     -- Merge — last plugin wins on (x, y)
-    local merged     = {}   -- key "x,y" → tile dict
+    local merged     = {}
     local world_seed = 0
 
     for _, raw in ipairs(plugins) do
@@ -72,41 +112,63 @@ function export(plugins, scripts_dir, output_dir, kwargs)
 
     -- ── content/tiles/<name>.json ─────────────────────────────────────────────
     for _, tile in ipairs(live) do
-        local tile_name  = trim(tile.tile or "")
-        local rooms_data = tile.rooms or {}
-        if tile_name == "" or #rooms_data == 0 then goto next_tile end
+        local tile_name   = trim(tile.tile or "")
+        local blocks_data = tile.room_blocks or {}
+        local links_data  = tile.room_links  or {}
+        if tile_name == "" or (#blocks_data == 0 and #links_data == 0) then
+            goto next_tile
+        end
 
-        -- Ordered unique room ids (first appearance)
-        local room_ids  = {}
-        local seen_room = {}
-        for _, r in ipairs(rooms_data) do
-            if not seen_room[r.id] then
-                room_ids[#room_ids+1] = r.id
-                seen_room[r.id] = true
+        -- Collect all tags defined in this tile's blocks
+        local known_tags = {}
+        for _, block in ipairs(blocks_data) do
+            for _, tag in ipairs(block.tags or {}) do
+                known_tags[tag] = true
             end
         end
 
-        -- Connection lists per room id (merge duplicates)
-        local connections = {}
-        for _, r in ipairs(rooms_data) do
-            local rid = r.id
-            if not connections[rid] then connections[rid] = {} end
-            for _, c in ipairs(r.connections or {}) do
-                local dup = false
-                for _, ex in ipairs(connections[rid]) do
-                    if ex == c then dup = true; break end
+        -- Parse connection strings; warn on unknown tags
+        local parsed_links = {}
+        for _, lnk_str in ipairs(links_data) do
+            local lnk = parse_link(lnk_str)
+            if lnk then
+                if not known_tags[lnk.a] then
+                    print("[world] WARNING tile '" .. tile_name ..
+                          "': link tag '" .. lnk.a .. "' not found in any block")
                 end
-                if not dup then connections[rid][#connections[rid]+1] = c end
+                if not known_tags[lnk.b] then
+                    print("[world] WARNING tile '" .. tile_name ..
+                          "': link tag '" .. lnk.b .. "' not found in any block")
+                end
+                parsed_links[#parsed_links+1] = lnk
             end
         end
 
-        local entry_room = trim(tile.entry_room or "")
-        if entry_room == "" and #room_ids > 0 then entry_room = room_ids[1] end
+        -- Build output blocks, stripping entries with no room name
+        local out_blocks = {}
+        for _, block in ipairs(blocks_data) do
+            local out_entries = {}
+            for _, e in ipairs(block.entries or {}) do
+                local cond, room = parse_entry(e)
+                if room ~= "" then
+                    out_entries[#out_entries+1] = {
+                        condition = cond,
+                        room      = room,
+                    }
+                end
+            end
+            if #out_entries > 0 then
+                out_blocks[#out_blocks+1] = {
+                    tags    = block.tags or {},
+                    entries = out_entries,
+                }
+            end
+        end
 
         write_json(J(tiles_dir, tile_name .. ".json"), {
-            entry_room  = entry_room,
-            rooms       = room_ids,
-            connections = connections,
+            entry_tag   = trim(tile.entry_tag or ""),
+            blocks      = out_blocks,
+            connections = parsed_links,
         })
         written = written + 1
         ::next_tile::

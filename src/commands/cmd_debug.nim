@@ -86,8 +86,8 @@ proc cmdDbTile(state: var GameState; args: seq[string]): CmdResult =
     let exists = if td.id != "": "found" else: "missing"
     lines.add &"  tile file:   content/tiles/{tileName}.json  ({exists})"
     if td.id != "":
-      lines.add &"    entry_room:  {td.entryRoom}"
-      lines.add &"    rooms:       {td.rooms}"
+      lines.add &"    entry_tag:   {td.entryTag}"
+      lines.add &"    blocks:      {td.blocks.len} block(s), {td.allRooms().len} room(s)"
 
   # Dirty data
   lines.add &"  dirty file:  saves/working/dirty/{key}.json"

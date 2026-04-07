@@ -10,7 +10,7 @@
 ##   [{"var": "quest_wheat_done", "op": "set", "value": 1}, ...]
 ##   Ops: set  add  sub
 
-import std/[json, tables]
+import std/[json, strutils, tables]
 
 proc evalConditions*(conditions: seq[JsonNode]; variables: Table[string, JsonNode]): bool =
   ## Returns true when every condition passes (AND). Empty list always passes.
@@ -39,6 +39,40 @@ proc evalConditions*(conditions: seq[JsonNode]; variables: Table[string, JsonNod
       if val.getFloat(0) > target.getFloat(0): return false
     else: discard
   return true
+
+proc evalConditionStr*(cond: string; variables: Table[string, JsonNode]): bool =
+  ## Evaluate a free-form "var op value" condition string. Empty → true.
+  ## Numeric ops: > < >= <=. Equality ops: = != (string or numeric match).
+  ## Unrecognisable format → true (fail-open).
+  let s = cond.strip()
+  if s == "": return true
+  var opStr = ""; var sepIdx = -1
+  for op in [">=", "<=", "!="]:
+    let i = s.find(op)
+    if i >= 0: opStr = op; sepIdx = i; break
+  if sepIdx < 0:
+    for op in [">", "<", "="]:
+      let i = s.find(op)
+      if i >= 0: opStr = op; sepIdx = i; break
+  if sepIdx < 0: return true  # no operator found
+  let varName = s[0 ..< sepIdx].strip()
+  let rhs     = s[sepIdx + opStr.len .. ^1].strip()
+  let val     = variables.getOrDefault(varName, newJNull())
+  let valF    = val.getFloat(0)
+  let rhsF    = try: rhs.parseFloat except ValueError: 0.0
+  case opStr
+  of "=":
+    if val.kind in {JInt, JFloat}: return valF == rhsF
+    return val.getStr == rhs
+  of "!=":
+    if val.kind in {JInt, JFloat}: return valF != rhsF
+    return val.getStr != rhs
+  of ">":  return val.kind != JNull and valF > rhsF
+  of "<":  return val.kind != JNull and valF < rhsF
+  of ">=": return val.kind != JNull and valF >= rhsF
+  of "<=": return val.kind != JNull and valF <= rhsF
+  else: true
+
 
 proc applyChanges*(changes: seq[JsonNode]; variables: var Table[string, JsonNode]) =
   ## Apply a list of variable changes to the variables table in-place.

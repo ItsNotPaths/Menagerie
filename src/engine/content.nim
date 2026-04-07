@@ -6,7 +6,7 @@
 ## Call loadContent(contentDir) once before starting the game loop.
 ## contentDir is the path to the content/ directory.
 
-import std/[json, os, tables]
+import std/[json, os, strutils, tables]
 import log
 
 # ── Types ─────────────────────────────────────────────────────────────────────
@@ -54,12 +54,20 @@ type
     lockSchedule*: seq[LockEntry]
     raw*:          JsonNode   ## enemies, sprite_positions, etc.
 
+  TileBlockEntry* = object
+    condition*: string   ## "" = unconditional; "var op value" otherwise
+    room*:      string
+
+  TileBlock* = object
+    tags*:    seq[string]
+    entries*: seq[TileBlockEntry]
+
   TileDef* = object
     ## A tile is a named location (town/dungeon) with its own room graph.
-    id*:        string   ## tile name (filename without .json)
-    entryRoom*: string
-    rooms*:     seq[string]
-    raw*:       JsonNode   ## connections
+    id*:       string   ## tile name (filename without .json)
+    entryTag*: string   ## tag identifying the default entry block
+    blocks*:   seq[TileBlock]
+    raw*:      JsonNode   ## full JSON (connections list, etc.)
 
   ArmorPlateDef* = object
     id*, displayName*, zone*: string
@@ -264,14 +272,28 @@ proc loadTiles(dir: string) =
     let d = loadJson(f)
     if d.kind != JObject: continue
     let id = f.splitFile.name
-    var roomList: seq[string]
-    if d.hasKey("rooms") and d["rooms"].kind == JArray:
-      for r in d["rooms"]: roomList.add r.getStr
+    var blocks: seq[TileBlock]
+    let jblocks = d{"blocks"}
+    if jblocks != nil and jblocks.kind == JArray:
+      for jb in jblocks:
+        var blk = TileBlock(tags: strSeq(jb{"tags"}))
+        let jentries = jb{"entries"}
+        if jentries != nil and jentries.kind == JArray:
+          for je in jentries:
+            var cond = je{"condition"}.getStr
+            var room = je{"room"}.getStr
+            if cond == "":   # heal unsplit "condition: room" in room field
+              let i = room.find(':')
+              if i >= 0:
+                cond = room[0 ..< i].strip()
+                room = room[i + 1 .. ^1].strip()
+            blk.entries.add TileBlockEntry(condition: cond, room: room)
+        blocks.add blk
     tilesDefs[id] = TileDef(
-      id:        id,
-      entryRoom: d{"entry_room"}.getStr,
-      rooms:     roomList,
-      raw:       d,
+      id:       id,
+      entryTag: d{"entry_tag"}.getStr,
+      blocks:   blocks,
+      raw:      d,
     )
 
 proc loadArmorPlates(dir: string) =
@@ -440,6 +462,15 @@ proc getTileDef*(id: string): TileDef =
   else:
     logWarn("content: tile def not found: " & id)
     TileDef(id: id)
+
+proc allRooms*(td: TileDef): seq[string] =
+  ## All unique room IDs across every block of a tile definition.
+  var seen: Table[string, bool]
+  for blk in td.blocks:
+    for e in blk.entries:
+      if e.room != "" and e.room notin seen:
+        seen[e.room] = true
+        result.add e.room
 
 proc getArmorPlate*(id: string): ArmorPlateDef =
   if id in armorPlates: armorPlates[id]

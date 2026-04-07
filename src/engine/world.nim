@@ -15,6 +15,7 @@ import engine/clock
 import engine/saves
 import engine/gameplay_vars
 import engine/items
+import engine/variables
 
 # ── Terrain constants ─────────────────────────────────────────────────────────
 
@@ -246,6 +247,27 @@ proc getNpcRoom(npc: JsonNode; tileId: string; currentTick: int; defaultRoom: st
   if bestTick < 0: wrapRoom else: bestRoom
 
 
+# ── Tile entry room resolution ────────────────────────────────────────────────
+
+proc resolveEntryRoom(td: TileDef; vars: Table[string, JsonNode]): string =
+  ## Return the room to enter based on entryTag and current game variables.
+  ## Finds the first block whose tags include entryTag (or the first block when
+  ## entryTag is ""), then returns the first entry whose condition passes.
+  let tag = td.entryTag
+  var blk: TileBlock
+  var found = false
+  for b in td.blocks:
+    if tag == "" or tag in b.tags:
+      blk = b; found = true; break
+  if not found:
+    if td.blocks.len > 0: blk = td.blocks[0]
+    else: return ""
+  for e in blk.entries:
+    if variables.evalConditionStr(e.condition, vars):
+      return e.room
+  ""
+
+
 # ── NPC / occupant resolution ─────────────────────────────────────────────────
 
 type OccupantInfo = tuple[id: string; label: string; hostile: bool]
@@ -268,7 +290,7 @@ proc getNpcsInRoom*(state: GameState): seq[OccupantInfo] =
   var entryRoom = roomId
   if tileId != "":
     let td = content.getTileDef(tileId)
-    if td.id != "": entryRoom = td.entryRoom
+    if td.id != "": entryRoom = resolveEntryRoom(td, state.variables)
 
   for npcId, loc in state.npcStates:
     if loc.kind != JObject: continue
@@ -334,7 +356,7 @@ proc rollStartPosition*(npcRaw: JsonNode): (int, int) =
 
 proc spawnTileEnemies(state: var GameState; tileKey: string; tileDef: TileDef; tileType: string) =
   ## Spawn persistent npc_states entries for every enemy listed in tile's rooms.
-  for roomId in tileDef.rooms:
+  for roomId in tileDef.allRooms():
     let room = content.getRoom(roomId)
     if room.id == "": continue
     let enemies = room.raw{"enemies"}
@@ -373,6 +395,7 @@ proc initLocatedDirty*(state: var GameState; key: string; tile: TileInfo) =
 
 proc getRoomConnections*(state: GameState): seq[string] =
   ## Return room IDs connected to the player's current room.
+  ## Resolves block tags → connections → target block conditions → room IDs.
   let (x, y) = state.player.position
   let key = &"{x}_{y}"
   let dirty = state.dirty.getOrDefault(key, newJNull())
@@ -381,11 +404,40 @@ proc getRoomConnections*(state: GameState): seq[string] =
   if tileName == "" or roomId == "": return @[]
   let td = content.getTileDef(tileName)
   if td.id == "": return @[]
-  let conns = td.raw{"connections"}
-  if conns == nil or conns.kind != JObject: return @[]
-  let roomConns = conns{roomId}
-  if roomConns == nil or roomConns.kind != JArray: return @[]
-  for r in roomConns: result.add r.getStr
+
+  # Collect tags belonging to blocks that contain the current room
+  var currentTags: seq[string]
+  for blk in td.blocks:
+    for e in blk.entries:
+      if e.room == roomId:
+        for tag in blk.tags:
+          if tag notin currentTags: currentTags.add tag
+        break
+
+  if currentTags.len == 0: return @[]
+
+  # Walk the connections list to find tags reachable from currentTags
+  let jconns = td.raw{"connections"}
+  if jconns == nil or jconns.kind != JArray: return @[]
+  var connectedTags: seq[string]
+  for conn in jconns:
+    if conn.kind != JObject: continue
+    let a = conn{"a"}.getStr
+    let b = conn{"b"}.getStr
+    let bidir = conn{"bidir"}.getBool(false)
+    if a in currentTags and b notin connectedTags: connectedTags.add b
+    if bidir and b in currentTags and a notin connectedTags: connectedTags.add a
+
+  # Resolve each connected tag to a room via conditions
+  for tag in connectedTags:
+    for blk in td.blocks:
+      if tag in blk.tags:
+        for e in blk.entries:
+          if variables.evalConditionStr(e.condition, state.variables):
+            if e.room != "" and e.room notin result:
+              result.add e.room
+            break
+        break
 
 
 proc roomAllowsWait*(state: GameState): bool =
@@ -576,7 +628,7 @@ proc enterLocation*(state: var GameState): seq[string] =
   if td.id == "":
     return @[&"(Tile preset '{tileName}' not found.)"]
 
-  state.player.currentRoom = td.entryRoom
+  state.player.currentRoom = resolveEntryRoom(td, state.variables)
   state.context = if tile.tileType == "town": ctxTown else: ctxDungeon
   populateRoomQueue(state)
 
@@ -766,10 +818,11 @@ proc peekLines*(state: GameState): seq[string] =
 
   let td = content.getTileDef(tileName)
   if td.id == "": return @[&"(Tile file '{tileName}' not found.)"]
-  if td.entryRoom == "": return @["(No entry room defined.)"]
+  let entryRoomId = resolveEntryRoom(td, state.variables)
+  if entryRoomId == "": return @["(No entry room defined.)"]
 
-  let room = content.getRoom(td.entryRoom)
-  if room.id == "": return @[&"(Room '{td.entryRoom}' not found.)"]
+  let room = content.getRoom(entryRoomId)
+  if room.id == "": return @[&"(Room '{entryRoomId}' not found.)"]
 
   result = @["You peer inside.", room.name, "-".repeat(40), room.description]
 
@@ -784,7 +837,7 @@ proc peekLines*(state: GameState): seq[string] =
       if loc.kind != JObject: continue
       if not loc{"alive"}.getBool(true): continue
       if loc.hasKey("spawned_from"):
-        if loc{"tile"}.getStr != key or loc{"room"}.getStr != td.entryRoom: continue
+        if loc{"tile"}.getStr != key or loc{"room"}.getStr != entryRoomId: continue
         let baseId = loc{"spawned_from"}.getStr
         let npc = content.getNpc(baseId)
         let label = if npc.id != "": npc.displayName else: baseId
@@ -793,7 +846,7 @@ proc peekLines*(state: GameState): seq[string] =
         if loc{"tile"}.getStr != tileName: continue
         let npc = content.getNpc(npcId)
         if npc.id == "": continue
-        if getNpcRoom(npc.raw, tileName, state.player.tick, td.entryRoom) != td.entryRoom: continue
+        if getNpcRoom(npc.raw, tileName, state.player.tick, entryRoomId) != entryRoomId: continue
         let label = npc.displayName
         if npc.isHostile: enemyLines.add &"  {label}"
         else: friendlyLines.add &"  {label}"
@@ -815,7 +868,7 @@ proc peekLines*(state: GameState): seq[string] =
       if not loc{"alive"}.getBool(true): continue
       let npc = content.getNpc(npcId)
       if npc.id == "": continue
-      if getNpcRoom(npc.raw, tileName, state.player.tick, td.entryRoom) != td.entryRoom: continue
+      if getNpcRoom(npc.raw, tileName, state.player.tick, entryRoomId) != entryRoomId: continue
       let label = npc.displayName
       if npc.isHostile: enemyLines.add &"  {label}"
       else: friendlyLines.add &"  {label}"
@@ -839,7 +892,7 @@ proc roomPeekLines*(state: GameState; roomId: string): seq[string] =
   let tileId = if dirty.kind == JObject: dirty{"tile"}.getStr else: ""
 
   let td = if tileId != "": content.getTileDef(tileId) else: TileDef()
-  let entryRoom = if td.id != "": td.entryRoom else: roomId
+  let entryRoom = if td.id != "": resolveEntryRoom(td, state.variables) else: roomId
 
   let room = content.getRoom(roomId)
   if room.id == "": return @[&"(Room '{roomId}' not found.)"]

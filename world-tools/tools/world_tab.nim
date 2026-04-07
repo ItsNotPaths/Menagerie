@@ -81,21 +81,30 @@ type
 
 proc tileToJson(t: TileEntry): JsonNode =
   result = newJObject()
-  result["x"]          = newJInt(t.x)
-  result["y"]          = newJInt(t.y)
-  result["tile"]       = newJString(t.tile)
-  result["type"]       = newJString(t.`type`)
-  result["image"]      = newJString(t.image)
-  result["entry_room"] = newJString(t.entry_room)
-  var roomsArr = newJArray()
-  for r in t.rooms:
-    var rj = newJObject()
-    rj["id"] = newJString(r.id)
-    var conns = newJArray()
-    for c in r.connections: conns.add newJString(c)
-    rj["connections"] = conns
-    roomsArr.add rj
-  result["rooms"] = roomsArr
+  result["x"]         = newJInt(t.x)
+  result["y"]         = newJInt(t.y)
+  result["tile"]      = newJString(t.tile)
+  result["type"]      = newJString(t.`type`)
+  result["image"]     = newJString(t.image)
+  result["entry_tag"] = newJString(t.entry_tag)
+  var blocksArr = newJArray()
+  for b in t.room_blocks:
+    var bj = newJObject()
+    var tagsArr = newJArray()
+    for tag in b.tags: tagsArr.add newJString(tag)
+    bj["tags"] = tagsArr
+    var entriesArr = newJArray()
+    for e in b.entries:
+      var ej = newJObject()
+      ej["condition"] = newJString(e.condition)
+      ej["room"]      = newJString(e.room)
+      entriesArr.add ej
+    bj["entries"] = entriesArr
+    blocksArr.add bj
+  result["room_blocks"] = blocksArr
+  var linksArr = newJArray()
+  for lnk in t.room_links: linksArr.add newJString(lnk)
+  result["room_links"] = linksArr
   var npcsArr = newJArray()
   for npc in t.global_npcs: npcsArr.add newJString(npc)
   result["global_npcs"] = npcsArr
@@ -105,20 +114,31 @@ proc tileToJson(t: TileEntry): JsonNode =
   result["encounter_tags"] = encTagsArr
 
 proc tileFromJson(j: JsonNode): TileEntry =
-  result.x          = j.getOrDefault("x").getInt
-  result.y          = j.getOrDefault("y").getInt
-  result.tile       = j.getOrDefault("tile").getStr
-  result.`type`     = j.getOrDefault("type").getStr("road")
-  result.image      = j.getOrDefault("image").getStr
-  result.entry_room = j.getOrDefault("entry_room").getStr
-  result.deleted    = j.getOrDefault("deleted").getBool(false)
-  if j.hasKey("rooms") and j["rooms"].kind == JArray:
-    for rj in j["rooms"]:
-      var r: RoomRef
-      r.id = rj.getOrDefault("id").getStr
-      if rj.hasKey("connections") and rj["connections"].kind == JArray:
-        for c in rj["connections"]: r.connections.add c.getStr
-      result.rooms.add r
+  result.x         = j.getOrDefault("x").getInt
+  result.y         = j.getOrDefault("y").getInt
+  result.tile      = j.getOrDefault("tile").getStr
+  result.`type`    = j.getOrDefault("type").getStr("road")
+  result.image     = j.getOrDefault("image").getStr
+  result.entry_tag = j.getOrDefault("entry_tag").getStr
+  result.deleted   = j.getOrDefault("deleted").getBool(false)
+  if j.hasKey("room_blocks") and j["room_blocks"].kind == JArray:
+    for bj in j["room_blocks"]:
+      var b: RoomBlock
+      if bj.hasKey("tags") and bj["tags"].kind == JArray:
+        for t in bj["tags"]: b.tags.add t.getStr
+      if bj.hasKey("entries") and bj["entries"].kind == JArray:
+        for ej in bj["entries"]:
+          var cond = ej.getOrDefault("condition").getStr
+          var room = ej.getOrDefault("room").getStr
+          if cond == "":   # heal unsplit "condition: room" stored in room field
+            let i = room.find(':')
+            if i >= 0:
+              cond = room[0 ..< i].strip()
+              room = room[i + 1 .. ^1].strip()
+          b.entries.add RoomCondEntry(condition: cond, room: room)
+      result.room_blocks.add b
+  if j.hasKey("room_links") and j["room_links"].kind == JArray:
+    for lnk in j["room_links"]: result.room_links.add lnk.getStr
   if j.hasKey("global_npcs") and j["global_npcs"].kind == JArray:
     for n in j["global_npcs"]: result.global_npcs.add n.getStr
   result.encounter_chance = j.getOrDefault("encounter_chance").getInt(0)
@@ -406,8 +426,19 @@ proc processFormResults(wt: var WorldTab) =
       wt.hasSel   = true
       wt.selTileX = entry.x
       wt.selTileY = entry.y
-      wt.statusMsg = "Unsaved changes"
-      wt.statusOk  = true
+      if wt.tileForm.warnMsgs.len > 0:
+        let warns = wt.tileForm.warnMsgs.join("; ")
+        wt.statusMsg = fmt"Unsaved — link warnings: {warns}"
+        wt.statusOk  = false
+        try:
+          let logPath = wt.modpackDir / "tools.log"
+          let f = open(logPath, fmAppend)
+          f.writeLine(fmt"[world tile ({entry.x},{entry.y})] {warns}")
+          f.close()
+        except: discard
+      else:
+        wt.statusMsg = "Unsaved changes"
+        wt.statusOk  = true
   elif wt.tileForm.wasCopied:
     wt.tileForm.wasCopied = false
     if wt.selPluginIdx >= 0:
@@ -516,7 +547,9 @@ proc handleMouseMotion*(wt: var WorldTab; x, y: int) =
   of dmNone: discard
 
 proc handleWheel*(wt: var WorldTab; dy, mx, my: int) =
-  if wt.tileForm.open: return
+  if wt.tileForm.open:
+    wt.tileForm.handleWheel(dy, mx, my)
+    return
   if not wt.inCanvas(mx, my): return
   let factor    = if dy > 0: 1.15 else: 1.0 / 1.15
   let newSize   = clamp(wt.cellSize * factor, CELL_MIN, CELL_MAX)
