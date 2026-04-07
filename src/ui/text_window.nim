@@ -24,7 +24,7 @@ const
   HUD_MARGIN   = 10
   HUD_PAD      = 6
   HUD_LINE_H   = 18
-  HUD_BOX_W    = 300
+  HUD_BOX_W    = 305
   TARGET_FPS   = 60
   FRAME_MS     = 1000 div TARGET_FPS
   CURSOR_BLINK   = 530  # ms

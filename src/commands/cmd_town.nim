@@ -7,6 +7,7 @@ import std/[sequtils, strformat, strutils]
 import engine/state
 import engine/world
 import engine/combat
+import engine/crafting
 import commands/core
 
 
@@ -60,6 +61,23 @@ proc cmdAttackStart(state: var GameState; args: seq[string]): CmdResult =
   result.imagePath = roomImagePath(state)
 
 
+proc cmdCraft(state: var GameState; args: seq[string]): CmdResult =
+  if args.len == 0:
+    ok(crafting.craftStationLines(state))
+  else:
+    ok(crafting.craftItemLines(state, args[0].toLowerAscii))
+
+proc cmdCraftInfo(state: var GameState; args: seq[string]): CmdResult =
+  if args.len < 2:
+    return err("craft_info <station> <item>")
+  ok(crafting.craftInfoLines(state, args[0].toLowerAscii, args[1].toLowerAscii))
+
+proc cmdCraftDo(state: var GameState; args: seq[string]): CmdResult =
+  if args.len < 2:
+    return err("craft_do <station> <item>")
+  ok(crafting.doCraft(state, args[0].toLowerAscii, args[1].toLowerAscii))
+
+
 proc initCmdTown*() =
   register("look",   ctxTown,    cmdLookRoom)
   register("move",   ctxTown,    cmdMoveRoom)
@@ -71,3 +89,7 @@ proc initCmdTown*() =
   register("leave",  ctxDungeon, cmdLeave)
   register("peek",   ctxDungeon, cmdPeekRoom)
   register("attack", ctxDungeon, cmdAttackStart)
+  register("craft",      ctxTown,    cmdCraft)
+  register("craft",      ctxDungeon, cmdCraft)
+  registerAny("craft_info", cmdCraftInfo, hidden = true)
+  registerAny("craft_do",   cmdCraftDo,   hidden = true)

@@ -28,8 +28,9 @@ type
 
   RoomPreset = object
     id, name, category, `type`, description, image: string
-    enemies:          seq[string]
-    sprite_positions: seq[SpritePos]
+    enemies:            seq[string]
+    crafting_stations:  seq[string]
+    sprite_positions:   seq[SpritePos]
     lock_schedule:    seq[LockEntry]
     deleted:          bool
 
@@ -42,7 +43,7 @@ type
   PresetItem = tuple[id: string; pidx: int]
 
   EditField = enum
-    efNone, efSearch, efName, efDescLine, efEnemyAdd, efImageFilter, efLockAdd
+    efNone, efSearch, efName, efDescLine, efEnemyAdd, efStationAdd, efImageFilter, efLockAdd
 
   DropTarget = enum dtNone, dtCategory, dtType, dtImage
 
@@ -97,7 +98,7 @@ type
     ## Form field y-positions (top of each labeled row)
     fIdY, fNameY, fCatY, fTypeY:  int
     fDescY, fDescH:               int
-    fImageY, fEnemyY:             int
+    fImageY, fEnemyY, fStationY:  int
     fSpriteY, fCopyBtnY:          int
 
     ## Drop popup bounds (when open)
@@ -112,6 +113,10 @@ type
     ## Enemy chip rects (rebuilt each render pass)
     chipRects:    seq[tuple[x, y, w, h: int]]
     enemyAddBtnX, enemyAddBtnY, enemyAddBtnW: int
+
+    ## Crafting station chip rects (rebuilt each render pass)
+    stationChipRects:                              seq[tuple[x, y, w, h: int]]
+    stationAddBtnX, stationAddBtnY, stationAddBtnW: int
     spriteBtnX,   spriteBtnY,   spriteBtnW:   int
     copyBtnX,     copyBtnY,     copyBtnW:     int
 
@@ -148,6 +153,9 @@ proc loadRoomsPlugin(path: string): RoomsPlugin =
     let en = pn.getOrDefault("enemies")
     if not en.isNil and en.kind == JArray:
       for e in en: p.enemies.add e.getStr
+    let cs = pn.getOrDefault("crafting_stations")
+    if not cs.isNil and cs.kind == JArray:
+      for s in cs: p.crafting_stations.add s.getStr
     let sp = pn.getOrDefault("sprite_positions")
     if not sp.isNil and sp.kind == JArray:
       for pair in sp:
@@ -179,6 +187,9 @@ proc toJson(p: RoomsPlugin): JsonNode =
     var enemies = newJArray()
     for e in pr.enemies: enemies.add newJString(e)
     pn["enemies"] = enemies
+    var stations = newJArray()
+    for s in pr.crafting_stations: stations.add newJString(s)
+    pn["crafting_stations"] = stations
     var positions = newJArray()
     for s in pr.sprite_positions:
       var pair = newJArray()
@@ -380,6 +391,11 @@ proc commitEdit(rt: var RoomsTab) =
     let tag = rt.editBuf.strip()
     if tag.len > 0 and tag notin ap.presets[rt.selPresetId].enemies:
       ap.presets[rt.selPresetId].enemies.add tag
+      ap.dirty = true
+  of efStationAdd:
+    let tag = rt.editBuf.strip()
+    if tag.len > 0 and tag notin ap.presets[rt.selPresetId].crafting_stations:
+      ap.presets[rt.selPresetId].crafting_stations.add tag
       ap.dirty = true
   else: discard
   rt.editField = efNone
@@ -646,6 +662,56 @@ proc renderForm(rt: var RoomsTab; ren: RendererPtr; font: FontPtr;
       rt.enemyAddBtnW = addBtnW
 
   cy = chipRowY + ROW_H + PAD
+
+  ## crafting_stations
+  rt.fStationY = cy
+  renderText(ren, font, "crafting", lx, cy + (ROW_H - fontH) div 2 - 2, FG_DIM)
+  rt.stationChipRects.setLen(0)
+  var stChipX    = ix
+  var stChipRowY = cy
+
+  for i, s in pr.crafting_stations:
+    let xMark = if isForeign: 0 else: ROW_H div 2 + 2
+    let cw    = textWidth(font, s) + CHIP_PAD * 2 + xMark
+    if stChipX + cw > ix + iw and stChipX > ix:
+      stChipX    = ix
+      stChipRowY += ROW_H
+    ren.fillRect(stChipX, stChipRowY + 3, cw, CHIP_H, BG3)
+    renderText(ren, font, s, stChipX + CHIP_PAD,
+               stChipRowY + 3 + (CHIP_H - fontH) div 2 - 2,
+               if isForeign: FG_DIM else: FG)
+    if not isForeign:
+      renderText(ren, font, "×", stChipX + cw - xMark,
+                 stChipRowY + 3 + (CHIP_H - fontH) div 2 - 2, FG_DEL)
+    rt.stationChipRects.add (stChipX, stChipRowY + 3, cw, CHIP_H)
+    stChipX += cw + CHIP_GAP
+
+  if not isForeign:
+    if rt.editField == efStationAdd:
+      let addW = iw div 2
+      ren.fillRect(stChipX, stChipRowY, addW, ROW_H, BG2)
+      ren.drawRect(stChipX, stChipRowY, addW, ROW_H, FG_ACTIVE)
+      renderText(ren, font, rt.editBuf, stChipX + PAD,
+                 stChipRowY + (ROW_H - fontH) div 2 - 2, FG_ACTIVE)
+      let showC2 = (getTicks().int div 530) mod 2 == 0
+      if showC2:
+        let cx2 = stChipX + PAD + textWidth(font, rt.editBuf[0 ..< rt.editCursorPos])
+        ren.drawVLine(cx2, stChipRowY + 3, ROW_H - 6, FG_ACTIVE)
+      rt.stationAddBtnX = stChipX
+      rt.stationAddBtnY = stChipRowY
+      rt.stationAddBtnW = addW
+    else:
+      let addBtnW = textWidth(font, "+ Add") + PAD * 2
+      let addHot  = inR(mx, my, stChipX, stChipRowY + 3, addBtnW, CHIP_H)
+      ren.fillRect(stChipX, stChipRowY + 3, addBtnW, CHIP_H,
+                   if addHot: BTN_HOV else: BTN_BG)
+      renderText(ren, font, "+ Add", stChipX + PAD,
+                 stChipRowY + 3 + (CHIP_H - fontH) div 2 - 2, FG_OK)
+      rt.stationAddBtnX = stChipX
+      rt.stationAddBtnY = stChipRowY + 3
+      rt.stationAddBtnW = addBtnW
+
+  cy = stChipRowY + ROW_H + PAD
 
   ## sprite_positions
   rt.fSpriteY = cy
@@ -996,13 +1062,32 @@ proc handleMouseDown*(rt: var RoomsTab; x, y, btn: int; activePluginPath: string
         ap.dirty = true; rt.statusMsg = "Unsaved changes"; rt.statusOk = true
       return
 
-  ## + Add button
+  ## + Add button (enemies)
   if rt.editField != efEnemyAdd and
      inR(x, y, rt.enemyAddBtnX, rt.enemyAddBtnY, rt.enemyAddBtnW, CHIP_H) and
      not isForeign:
     if rt.editField == efDescLine: rt.syncDescLine()
     rt.commitEdit()
     rt.enterEdit(efEnemyAdd, "")
+    return
+
+  ## crafting station chip × buttons
+  for i, cr in rt.stationChipRects:
+    if isForeign: break
+    let xBtn = cr.x + cr.w - ROW_H div 2 - 2
+    if inR(x, y, xBtn, cr.y, ROW_H div 2 + 4, cr.h):
+      if not ap.isNil and ap.presets.hasKey(rt.selPresetId):
+        ap.presets[rt.selPresetId].crafting_stations.delete(i)
+        ap.dirty = true; rt.statusMsg = "Unsaved changes"; rt.statusOk = true
+      return
+
+  ## + Add button (crafting stations)
+  if rt.editField != efStationAdd and
+     inR(x, y, rt.stationAddBtnX, rt.stationAddBtnY, rt.stationAddBtnW, CHIP_H) and
+     not isForeign:
+    if rt.editField == efDescLine: rt.syncDescLine()
+    rt.commitEdit()
+    rt.enterEdit(efStationAdd, "")
     return
 
   ## [Edit Positions] button
@@ -1095,7 +1180,7 @@ proc handleTextInput*(rt: var RoomsTab; text: string) =
     rt.editCursorPos += text.len
     rt.searchBuf = rt.editBuf
     rt.buildFiltered()
-  of efName, efEnemyAdd, efDescLine, efLockAdd:
+  of efName, efEnemyAdd, efStationAdd, efDescLine, efLockAdd:
     rt.editBuf.insert(text, rt.editCursorPos)
     rt.editCursorPos += text.len
   of efImageFilter:

@@ -18,6 +18,8 @@ type
     extraSlots*, staminaReq*:                   int   ## container fields
     canEquip*:                                  bool
     effects*:                                   seq[string]   ## command strings
+    stationTags*:                               seq[string]   ## crafting station ids
+    recipe*:                                    seq[string]   ## "<item-id>x<count>" entries
 
   SpellDef* = object
     id*, displayName*, castType*, description*: string
@@ -114,8 +116,9 @@ type
 # ── Module-level content tables ───────────────────────────────────────────────
 
 var
-  items*:       Table[string, ItemDef]
-  spells*:      Table[string, SpellDef]
+  items*:         Table[string, ItemDef]
+  craftingIndex*: Table[string, seq[string]]   ## station tag → ordered item id list
+  spells*:        Table[string, SpellDef]
   effects*:     Table[string, EffectDef]
   npcs*:        Table[string, NpcDef]
   rooms*:       Table[string, RoomDef]
@@ -162,8 +165,10 @@ proc loadItems(dir: string) =
       staminaCost: d{"stamina_cost"}.getInt(0),
       extraSlots:  d{"extra_slots"}.getInt(0),
       staminaReq:  d{"stamina_req"}.getInt(0),
-      canEquip:    d{"can_equip"}.getBool(false),
-      effects:     strSeq(d{"effects"}),
+      canEquip:     d{"can_equip"}.getBool(false),
+      effects:      strSeq(d{"effects"}),
+      stationTags:  strSeq(d{"station_tags"}),
+      recipe:       strSeq(d{"recipe"}),
     )
 
 proc loadSpells(dir: string) =
@@ -384,6 +389,14 @@ proc generateRoomKeys() =
       canEquip:    false,
     )
 
+proc buildCraftingIndex() =
+  ## Build craftingIndex: station tag → ordered list of item ids.
+  craftingIndex.clear()
+  for id, def in items:
+    for tag in def.stationTags:
+      if tag notin craftingIndex: craftingIndex[tag] = @[]
+      craftingIndex[tag].add id
+
 proc loadContent*(contentDir: string) =
   ## Load all content from contentDir at startup. Call once before game loop.
   loadItems(contentDir)
@@ -400,6 +413,7 @@ proc loadContent*(contentDir: string) =
   loadWorldDef(contentDir)
   loadAssetIndex(contentDir)
   generateRoomKeys()
+  buildCraftingIndex()
   logInfo("content: loaded " &
     $items.len & " items, " &
     $spells.len & " spells, " &
@@ -424,6 +438,10 @@ proc getItem*(id: string): ItemDef =
   else:
     logWarn("content: item not found: " & id)
     ItemDef(id: id)
+
+proc getCraftingItems*(station: string): seq[string] =
+  ## Return all item ids craftable at the given station tag, in load order.
+  craftingIndex.getOrDefault(station, @[])
 
 proc getSpell*(id: string): SpellDef =
   if id in spells: spells[id]

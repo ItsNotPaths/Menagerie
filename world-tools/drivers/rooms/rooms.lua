@@ -6,6 +6,12 @@
   category; last plugin wins on preset_id conflicts within the same category.
   Tombstones stripped. Editor-only fields (id, category) stripped from output.
 
+  Known preset fields:
+    name, type, description, image          -- strings
+    enemies, crafting_stations              -- string arrays
+    sprite_positions                        -- [[x,y], …] float pairs
+    lock_schedule                           -- [{tick, locked}, …]
+
   Output:
     <output_dir>/rooms/<category>/<id>.json
 
