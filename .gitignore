@@ -20,3 +20,6 @@ menagerie.exe
 
 # Docker build output
 .dockerignore
+
+# optimizer script for release png's
+optimize.sh
