@@ -16,6 +16,7 @@ import engine/saves
 import engine/gameplay_vars
 import engine/items
 import engine/variables
+import engine/conditions as cond
 
 # ── Terrain constants ─────────────────────────────────────────────────────────
 
@@ -631,6 +632,7 @@ proc enterLocation*(state: var GameState): seq[string] =
   state.player.currentRoom = resolveEntryRoom(td, state.variables)
   state.context = if tile.tileType == "town": ctxTown else: ctxDungeon
   populateRoomQueue(state)
+  cond.pruneEffects(state.player.effects)
 
   roomLines(state)
 
@@ -639,6 +641,7 @@ proc leaveLocation*(state: var GameState): seq[string] =
   ## Return to the world map from a location.
   state.player.currentRoom = ""
   state.context = ctxWorld
+  cond.pruneEffects(state.player.effects)
   let (x, y) = state.player.position
   tileLines(state, x, y)
 
@@ -656,6 +659,7 @@ proc leaveEncounterRoom*(state: var GameState): seq[string] =
   state.variables.del "_pending_encounter"
   state.player.currentRoom = ""
   state.context = ctxWorld
+  cond.pruneEffects(state.player.effects)
   let (x, y) = state.player.position
   tileLines(state, x, y)
 

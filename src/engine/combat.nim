@@ -31,7 +31,7 @@
 ##   wave  — all enemies within 1 row of tgt  damage × 0.35
 
 import std/[json, options, random, sequtils, strformat, strutils, tables]
-import state, content, gameplay_vars, saves
+import state, content, gameplay_vars, saves, log
 import api
 import clock
 import conditions as cond
@@ -181,14 +181,18 @@ proc shieldReduction(player: PlayerState): float =
 
 const weaponSkills = ["longblade", "shortblade", "longblunt", "shortblunt", "archery"]
 
-proc getEquippedWeaponSkill(player: PlayerState): string =
-  for itemId in [player.mainhand, player.offhand]:
-    if itemId == "": continue
-    let raw = content.items.getOrDefault(itemId)
-    # weapon_skill is not in ItemInfo; read from raw content if needed
-    # For now fall through to default
-    discard raw
-  "longblade"   ## default
+proc resolvedWeaponSkill(itemId: string): string =
+  ## Return the weapon_skill for itemId, logging a warning if missing/unknown.
+  ## Callers should skip items where this is not meaningful (shields, armor).
+  if itemId notin content.items: return "longblade"
+  let def = content.items[itemId]
+  if def.weaponSkill == "":
+    log.log(log.Game, log.Warn, &"Weapon '{itemId}' has no weapon_skill defined")
+    return "longblade"
+  if def.weaponSkill notin weaponSkills:
+    log.log(log.Game, log.Warn, &"Weapon '{itemId}' has unrecognised weapon_skill '{def.weaponSkill}'")
+    return "longblade"
+  def.weaponSkill
 
 
 proc applyResistances(enemy: CombatEnemy; damage: float; damageType: string): float =
@@ -206,9 +210,9 @@ proc applyResistances(enemy: CombatEnemy; damage: float; damageType: string): fl
 
 # ── Kill helpers ──────────────────────────────────────────────────────────────
 
-proc killEnemy(state: var GameState; enemy: CombatEnemy): seq[string] =
-  ## Drop loot, apply bounty, fire kill event.
-  ## Saves flush deferred to Phase 9.
+proc killEnemy(state: var GameState; enemy: CombatEnemy): (seq[string], seq[string]) =
+  ## Drop loot, apply bounty, fire death_script and kill event.
+  ## Returns (eventLines, droppedItemIds) so callers can summarise loot.
   let dropped = world.dropEntityLoot(state, enemy.id)
   # Bounty: only for non-hostile NPCs (civilians attacked by player)
   let faction = enemy.data{"faction"}.getStr
@@ -217,24 +221,10 @@ proc killEnemy(state: var GameState; enemy: CombatEnemy): seq[string] =
     state.variables[&"bounty_{faction}"] = %(prev + 3)
     saves.flushVariables(state)
   saves.flushNpcStates(state)
+  result[1] = dropped
   let deathScript = enemy.data{"death_script"}.getStr
   if deathScript != "":
-    result &= api.runCommand(state, deathScript, enemy.id)
-  # fire_event "kill" — context: _last_kill_type, _last_kill_faction, _kills_this_combat
-  result &= mods.fireEvent(state, "kill", enemy.id)
-  result   # also returns dropped as display names via the caller's count logic
-
-
-proc killEnemyDropped(state: var GameState; enemy: CombatEnemy): (seq[string], seq[string]) =
-  ## Returns (eventLines, droppedItemIds) separately so caller can summarise loot.
-  let dropped = world.dropEntityLoot(state, enemy.id)
-  let faction = enemy.data{"faction"}.getStr
-  if faction != "" and not enemy.data{"is_hostile"}.getBool(false):
-    let prev = state.variables.getOrDefault(&"bounty_{faction}", %0).getInt(0)
-    state.variables[&"bounty_{faction}"] = %(prev + 3)
-    saves.flushVariables(state)
-  saves.flushNpcStates(state)
-  result[1] = dropped
+    result[0] &= api.runCommand(state, deathScript, enemy.id)
   result[0] &= mods.fireEvent(state, "kill", enemy.id)
 
 
@@ -388,7 +378,7 @@ proc beginRound(state: var GameState): seq[string] =
     for e in effectKilled:
       result.add &"  {e.label} succumbs to their wounds."
       result.add COMBAT_PAUSE
-      let (evLines, dropped) = killEnemyDropped(state, e)
+      let (evLines, dropped) = killEnemy(state, e)
       result &= evLines
       if dropped.len > 0:
         result.add &"    Dropped: {lootSummary(dropped)}"
@@ -413,7 +403,7 @@ proc beginRound(state: var GameState): seq[string] =
     for e in trapKilled:
       result.add &"  {e.label} destroyed by trap."
       result.add COMBAT_PAUSE
-      let (evLines, dropped) = killEnemyDropped(state, e)
+      let (evLines, dropped) = killEnemy(state, e)
       result &= evLines
       if dropped.len > 0:
         result.add &"    Dropped: {lootSummary(dropped)}"
@@ -570,16 +560,35 @@ proc resolveRound(state: var GameState): seq[string]  # forward decl
 
 proc doAttack*(state: var GameState): seq[string] =
   if not state.combat.isSome: return @["No active combat."]
-  let (damage, cost) = weaponStats(state.player)
-  if state.player.stamina < cost:
-    return @[&"Not enough stamina to attack. ({int(state.player.stamina)} / {int(cost)} needed)"]
-  let ws     = getEquippedWeaponSkill(state.player)
-  var dmg    = damage * (1.0 + sk.skillPct(state, ws) * 0.5)
-  dmg *= mods.modifierGet(state, &"{ws}_damage_pct") * mods.modifierGet(state, "melee_damage_pct")
-  state.player.stamina -= cost
+
+  # Build one damage entry per equipped weapon hand (mainhand then offhand).
+  # Each weapon uses its own weapon_skill so mixed loadouts work correctly.
+  var damages: seq[float]
+  var totalCost = 0.0
+  for itemId in [state.player.mainhand, state.player.offhand]:
+    if itemId == "": continue
+    if itemId notin content.items: continue
+    let def = content.items[itemId]
+    if def.itemType.toLowerAscii in ["shield", "armor"]: continue
+    if def.damage == 0: continue
+    let ws  = resolvedWeaponSkill(itemId)
+    var dmg = def.damage.float * (1.0 + sk.skillPct(state, ws) * 0.5)
+    dmg *= mods.modifierGet(state, &"{ws}_damage_pct") * mods.modifierGet(state, "melee_damage_pct")
+    damages.add dmg
+    totalCost += def.staminaCost.float
+
+  # Unarmed fallback
+  if damages.len == 0:
+    damages.add gvFloat("base_player_damage", 12.0)
+    totalCost = gvFloat("attack_stamina_cost", 15.0)
+
+  if state.player.stamina < totalCost:
+    return @[&"Not enough stamina to attack. ({int(state.player.stamina)} / {int(totalCost)} needed)"]
+
+  state.player.stamina -= totalCost
   var cs = state.combat.get
   cs.playerLastAction = "attack"
-  cs.pendingAction    = %*{"type": "attack", "damage": dmg}
+  cs.pendingAction    = %*{"type": "attack", "damages": damages}
   state.combat = some(cs)
   result.add "You ready your weapon."
   result &= resolveRound(state)
@@ -798,19 +807,25 @@ proc firePendingAction(state: var GameState): seq[string] =
     if atRange.len == 0:
       result.add "  Your swing finds no one in range."
     else:
-      let rawDmg = pa{"damage"}.getFloat(gvFloat("base_player_damage", 12.0))
-      result.add &"  You strike {atRange.mapIt(it.label).join(\", \")}."
+      # Support multi-damage (dual-wield) and legacy single-damage pendingActions
+      let damagesNode = pa{"damages"}
+      let rawDamages = if damagesNode != nil and damagesNode.kind == JArray and damagesNode.len > 0:
+                         damagesNode.mapIt(it.getFloat(0.0))
+                       else:
+                         @[pa{"damage"}.getFloat(gvFloat("base_player_damage", 12.0))]
       var totalDealt = 0.0
-      for e in atRange:
-        let dmg = applyResistances(e, rawDmg, "physical")
-        result &= api.cmdDamage(state, "enemy." & e.id, e.id, dmg, "health")
-        totalDealt += dmg
+      for rawDmg in rawDamages:
+        result.add &"  You strike {atRange.mapIt(it.label).join(\", \")}."
+        for e in atRange:
+          let dmg = applyResistances(e, rawDmg, "physical")
+          result &= api.cmdDamage(state, "enemy." & e.id, e.id, dmg, "health")
+          totalDealt += dmg
+        result &= mods.fireEvent(state, "hit_landed", "player")
       state.variables["_last_hit_damage_dealt"]    = %totalDealt
       state.variables["_last_hit_target_id"]       = %(if atRange.len > 0: atRange[0].id else: "")
       state.variables["_last_hit_target_count"]    = %atRange.len
       let prevDealt = state.variables.getOrDefault("_damage_dealt_this_combat", %0.0).getFloat(0.0)
       state.variables["_damage_dealt_this_combat"] = %(prevDealt + totalDealt)
-      result &= mods.fireEvent(state, "hit_landed", "player")
 
   of "cast":
     let mode    = pa{"mode"}.getStr
@@ -982,7 +997,7 @@ proc resolveRound(state: var GameState): seq[string] =
     for e in killed:
       result.add &"  {e.label} is dead."
       result.add COMBAT_PAUSE
-      let (evLines, dropped) = killEnemyDropped(state, e)
+      let (evLines, dropped) = killEnemy(state, e)
       result &= evLines
       if dropped.len > 0:
         result.add &"    Dropped: {lootSummary(dropped)}"

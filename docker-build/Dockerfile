@@ -20,6 +20,8 @@ RUN apt-get update && apt-get install -y \
     # SDL2_image codec static libs \
     libpng-dev libjpeg-turbo8-dev libwebp-dev \
     zlib1g-dev \
+    # PCRE (Nim's std/re uses it via dlopen; static link to avoid runtime dep) \
+    libpcre3-dev \
     && rm -rf /var/lib/apt/lists/*
 
 # ── Build SDL2 (static only) ──────────────────────────────────────────────────

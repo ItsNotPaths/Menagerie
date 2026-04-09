@@ -17,6 +17,7 @@ type
     slotCost*, value*, damage*, staminaCost*:   int
     extraSlots*, staminaReq*:                   int   ## container fields
     canEquip*:                                  bool
+    weaponSkill*:                               string   ## e.g. "longblade", "shortblade"
     effects*:                                   seq[string]   ## command strings
     stationTags*:                               seq[string]   ## crafting station ids
     recipe*:                                    seq[string]   ## "<item-id>x<count>" entries
@@ -73,7 +74,7 @@ type
 
   ArmorPlateDef* = object
     id*, displayName*, zone*: string
-    defense*:                 int
+    defense*, value*:         int
     raw*:                     JsonNode   ## procs array
 
   ShopDef* = object
@@ -172,10 +173,11 @@ proc loadItems(dir: string) =
       staminaCost: d{"stamina_cost"}.getInt(0),
       extraSlots:  d{"extra_slots"}.getInt(0),
       staminaReq:  d{"stamina_req"}.getInt(0),
-      canEquip:     d{"can_equip"}.getBool(false),
-      effects:      strSeq(d{"effects"}),
-      stationTags:  strSeq(d{"station_tags"}),
-      recipe:       strSeq(d{"recipe"}),
+      canEquip:    d{"can_equip"}.getBool(false),
+      weaponSkill: d{"weapon_skill"}.getStr(""),
+      effects:     strSeq(d{"effects"}),
+      stationTags: strSeq(d{"station_tags"}),
+      recipe:      strSeq(d{"recipe"}),
     )
 
 proc loadSpells(dir: string) =
@@ -315,6 +317,7 @@ proc loadArmorPlates(dir: string) =
       displayName: d{"display_name"}.getStr(d{"name"}.getStr(id)),
       zone:        d{"zone"}.getStr,
       defense:     d{"defense"}.getInt(0),
+      value:       d{"value"}.getInt(0),
       raw:         d,
     )
 

@@ -10,12 +10,12 @@
 ## Use "player" for the player; "enemy.<id>" for a named enemy instance.
 
 import std/[json, sequtils, sets, strutils, strformat]
-import state, content, gameplay_vars, api_types
+import state, content, gameplay_vars, api_types, log
 
 
 proc hasEffect*(effects: seq[ActiveEffect]; effectId: string): bool =
-  ## True when effectId is currently active in the given effects seq.
-  effects.anyIt(it.id == effectId)
+  ## True when effectId is currently active (not dead/expired) in the effects seq.
+  effects.anyIt(it.id == effectId and it.ticksRemaining != 0)
 
 
 proc resistMult(resistances: JsonNode; effectId: string): float =
@@ -44,44 +44,51 @@ proc scaleCmd(cmd: string; mult: float): string =
 
 proc tickEffects*(state: var GameState; effects: var seq[ActiveEffect];
                   selfId: string; resistances: JsonNode = nil): seq[string] =
-  ## Per-round tick: fire tick_commands for every non-permanent effect,
-  ## decrement duration, fire on_expire_commands for those that reach 0,
-  ## then remove expired entries.
+  ## Per-round tick: fire tick_commands for every live non-permanent effect,
+  ## decrement duration, fire on_expire_commands for those that reach 0.
+  ## Expired effects (ticksRemaining == 0) are left in the list for index
+  ## stability; call pruneEffects at room transitions to clean up.
   ## Permanent effects (ticksRemaining == -1) are skipped entirely.
   if apiRunCommand == nil: return
-  var expiredIdx: seq[int]
   for i in 0 ..< effects.len:
-    if effects[i].ticksRemaining == -1: continue
+    if effects[i].ticksRemaining == -1: continue  # permanent
+    if effects[i].ticksRemaining == 0: continue   # already expired
     let def = content.getEffect(effects[i].id)
     let mult = resistMult(resistances, effects[i].id)
     for cmd in def.tickCommands:
       result &= apiRunCommand(state, scaleCmd(cmd, mult), selfId)
     effects[i].ticksRemaining = max(0, effects[i].ticksRemaining - 1)
-    if effects[i].ticksRemaining <= 0:
+    if effects[i].ticksRemaining == 0:
       for cmd in def.onExpireCommands:
         result &= apiRunCommand(state, cmd, selfId)
-      expiredIdx.add i
-  for i in countdown(expiredIdx.high, 0):
-    effects.delete(expiredIdx[i])
+
+
+proc pruneEffects*(effects: var seq[ActiveEffect]) =
+  ## Remove all expired effects (ticksRemaining == 0). Call at room transitions
+  ## to keep the list compact without invalidating indices during gameplay.
+  effects.keepIf(proc(e: ActiveEffect): bool = e.ticksRemaining != 0)
 
 
 proc checkInteractions*(state: var GameState; effects: var seq[ActiveEffect];
                         selfId: string; newEffectId: string): seq[string] =
   ## Check for interaction reactions triggered by a newly applied effect.
-  ## Only one reaction fires per call (first match across both passes wins).
+  ## All matching reactions fire (not just the first).
+  ## If reaction D itself adds an effect, that effect's interactions are
+  ## evaluated recursively via the apiAddEffect call.
   ##
   ## Pass 1 — new effect's own interactions field:
   ##   JArray  [{effect_id, result_id, duration, consumes}]
-  ##           fires when effect_id is already on target
+  ##           fires for every entry whose effect_id is already on the target
   ##   JObject {existing_id: {result, duration, consumes}}
   ##           same semantics, alternate author syntax
   ##
   ## Pass 2 — each existing effect's JObject interactions:
-  ##   fires when newEffectId appears as a key
+  ##   fires for every existing effect that lists newEffectId as a key
   if apiAddEffect == nil or apiRunCommand == nil: return
 
   var currentIds: HashSet[string]
-  for e in effects: currentIds.incl e.id
+  for e in effects:
+    if e.ticksRemaining != 0: currentIds.incl e.id
 
   # ── Pass 1: new effect's own interactions ─────────────────────────────────
   let newDef = content.getEffect(newEffectId)
@@ -99,7 +106,6 @@ proc checkInteractions*(state: var GameState; effects: var seq[ActiveEffect];
           effects.keepIf(proc(e: ActiveEffect): bool = e.id notin cs)
         if resultId != "":
           result &= apiAddEffect(state, selfId, resultId, dur, selfId)
-        return
 
     elif ix.kind == JObject:
       for existingId, ixEntry in ix.pairs:
@@ -112,12 +118,12 @@ proc checkInteractions*(state: var GameState; effects: var seq[ActiveEffect];
           effects.keepIf(proc(e: ActiveEffect): bool = e.id notin cs)
         if resultId != "":
           result &= apiAddEffect(state, selfId, resultId, dur, selfId)
-        return
 
   # ── Pass 2: existing effects' dict-keyed interactions ─────────────────────
   # Snapshot so keepIf below doesn't affect iteration order
   let snapshot = effects
   for e in snapshot:
+    if e.ticksRemaining == 0: continue  # skip dead
     if e.id == newEffectId: continue
     let def = content.getEffect(e.id)
     let eix = def.interactions
@@ -132,4 +138,3 @@ proc checkInteractions*(state: var GameState; effects: var seq[ActiveEffect];
       effects.keepIf(proc(e: ActiveEffect): bool = e.id notin cs)
     if resultId != "":
       result &= apiAddEffect(state, selfId, resultId, dur, selfId)
-    return

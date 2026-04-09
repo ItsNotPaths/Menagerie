@@ -37,7 +37,7 @@
 ##   sell            <item_id>                    sell an item from inventory
 ##   economic_event  <event_id> [replace|extend]  activate or update an economic event
 
-import std/[json, options, strformat, strutils, sequtils, tables]
+import std/[json, options, strformat, strutils, tables]
 import state, content, items, api_types, scripting
 import conditions as cond
 import armor      as armormod
@@ -190,9 +190,9 @@ proc addEffect*(state: var GameState; selector, effectId: string;
   let sel = selector.toLowerAscii
 
   if sel == "player":
-    # Refresh existing
+    # Refresh existing (skip dead effects with ticksRemaining == 0)
     for i in 0 ..< state.player.effects.len:
-      if state.player.effects[i].id == effectId:
+      if state.player.effects[i].id == effectId and state.player.effects[i].ticksRemaining != 0:
         state.player.effects[i].ticksRemaining =
           max(state.player.effects[i].ticksRemaining, duration)
         let plates = armormod.iterEquippedPlates(state)
@@ -215,29 +215,35 @@ proc addEffect*(state: var GameState; selector, effectId: string;
     state.variables["_last_effect_duration"] = %duration
     result &= mods.fireEvent(state, "effect_received", "player")
 
-    # First tick fires on the turn the effect is gained
+    # First tick fires on the turn the effect is gained.
+    # Re-find by id after tick commands: they may have called remove_effect on
+    # this or other effects, invalidating the index captured above.
+    # Expired effects are marked dead (ticksRemaining = 0) and left in the list;
+    # pruneEffects removes them at room transitions.
     for i in 0 ..< state.player.effects.len:
       if state.player.effects[i].id == effectId:
         for cmd in def.tickCommands:
           result &= runCommand(state, cmd, "player")
-        state.player.effects[i].ticksRemaining =
-          max(0, state.player.effects[i].ticksRemaining - 1)
-        if state.player.effects[i].ticksRemaining <= 0:
-          for cmd in def.onExpireCommands:
-            result &= runCommand(state, cmd, "player")
-          state.player.effects.delete(i)
+        for j in 0 ..< state.player.effects.len:
+          if state.player.effects[j].id == effectId and state.player.effects[j].ticksRemaining != 0:
+            state.player.effects[j].ticksRemaining =
+              max(0, state.player.effects[j].ticksRemaining - 1)
+            if state.player.effects[j].ticksRemaining == 0:
+              for cmd in def.onExpireCommands:
+                result &= runCommand(state, cmd, "player")
+            break
         break
 
   elif sel.startsWith("enemy.") and state.combat.isSome:
     let rawId = sel[6..^1]
     let eid   = if rawId == "self": selfId else: rawId
-    let idx   = resolveEnemyIdx(state, eid)
+    var idx   = resolveEnemyIdx(state, eid)
     if idx < 0: return
     var cs = state.combat.get
 
-    # Refresh existing
+    # Refresh existing (skip dead effects with ticksRemaining == 0)
     for i in 0 ..< cs.enemies[idx].effects.len:
-      if cs.enemies[idx].effects[i].id == effectId:
+      if cs.enemies[idx].effects[i].id == effectId and cs.enemies[idx].effects[i].ticksRemaining != 0:
         cs.enemies[idx].effects[i].ticksRemaining =
           max(cs.enemies[idx].effects[i].ticksRemaining, duration)
         state.combat = some(cs)
@@ -252,35 +258,51 @@ proc addEffect*(state: var GameState; selector, effectId: string;
     if def.displayName != "":
       result.add &"  {label}: {def.displayName} applied."
 
-    if state.combat.isSome:
-      var cs2 = state.combat.get
-      result &= cond.checkInteractions(state, cs2.enemies[idx].effects,
-                                       "enemy." & eid, effectId)
-      # First tick
-      for i in 0 ..< cs2.enemies[idx].effects.len:
-        if cs2.enemies[idx].effects[i].id == effectId:
-          for cmd in def.tickCommands:
-            result &= runCommand(state, cmd, eid)
-          if state.combat.isSome:
+    # Re-resolve idx: onApplyCommands may have killed lower-indexed enemies,
+    # shifting the array.  Use enemy id (eid) as the stable identifier.
+    if not state.combat.isSome: return
+    idx = resolveEnemyIdx(state, eid)
+    if idx < 0: return
+    var cs2 = state.combat.get
+    result &= cond.checkInteractions(state, cs2.enemies[idx].effects,
+                                     "enemy." & eid, effectId)
+    # First tick — re-find effect by id inside the re-resolved enemy slot
+    for i in 0 ..< cs2.enemies[idx].effects.len:
+      if cs2.enemies[idx].effects[i].id == effectId:
+        for cmd in def.tickCommands:
+          result &= runCommand(state, cmd, eid)
+        # Re-resolve again: tick commands may also kill/shift enemies
+        if state.combat.isSome:
+          let idx3 = resolveEnemyIdx(state, eid)
+          if idx3 >= 0:
             var cs3 = state.combat.get
-            cs3.enemies[idx].effects[i].ticksRemaining =
-              max(0, cs3.enemies[idx].effects[i].ticksRemaining - 1)
-            if cs3.enemies[idx].effects[i].ticksRemaining <= 0:
-              for cmd in def.onExpireCommands:
-                result &= runCommand(state, cmd, eid)
-              cs3.enemies[idx].effects.delete(i)
-            state.combat = some(cs3)
-          break
+            for j in 0 ..< cs3.enemies[idx3].effects.len:
+              if cs3.enemies[idx3].effects[j].id == effectId:
+                cs3.enemies[idx3].effects[j].ticksRemaining =
+                  max(0, cs3.enemies[idx3].effects[j].ticksRemaining - 1)
+                if cs3.enemies[idx3].effects[j].ticksRemaining <= 0:
+                  for cmd in def.onExpireCommands:
+                    result &= runCommand(state, cmd, eid)
+                  cs3.enemies[idx3].effects.delete(j)
+                state.combat = some(cs3)
+                break
+        break
 
 
 # ── Verb: remove_effect ───────────────────────────────────────────────────────
 
 proc removeEffect(state: var GameState; sel, selfId, effectId: string): seq[string] =
+  ## Mark matching effects as dead (ticksRemaining = 0) rather than deleting
+  ## immediately, preserving list indices for any in-progress iteration.
+  ## pruneEffects cleans them up at room transitions.
   let s = sel.toLowerAscii
   if s == "player":
-    let before = state.player.effects.len
-    state.player.effects.keepIf(proc(e: ActiveEffect): bool = e.id != effectId)
-    if state.player.effects.len < before:
+    var removed = 0
+    for i in 0 ..< state.player.effects.len:
+      if state.player.effects[i].id == effectId and state.player.effects[i].ticksRemaining != 0:
+        state.player.effects[i].ticksRemaining = 0
+        removed.inc
+    if removed > 0:
       result.add &"  You: {effectId} removed."
   elif s.startsWith("enemy.") and state.combat.isSome:
     let rawId = s[6..^1]
@@ -288,9 +310,12 @@ proc removeEffect(state: var GameState; sel, selfId, effectId: string): seq[stri
     let idx   = resolveEnemyIdx(state, eid)
     if idx >= 0:
       var cs = state.combat.get
-      let before = cs.enemies[idx].effects.len
-      cs.enemies[idx].effects.keepIf(proc(e: ActiveEffect): bool = e.id != effectId)
-      if cs.enemies[idx].effects.len < before:
+      var removed = 0
+      for i in 0 ..< cs.enemies[idx].effects.len:
+        if cs.enemies[idx].effects[i].id == effectId and cs.enemies[idx].effects[i].ticksRemaining != 0:
+          cs.enemies[idx].effects[i].ticksRemaining = 0
+          removed.inc
+      if removed > 0:
         result.add &"  {cs.enemies[idx].label}: {effectId} removed."
       state.combat = some(cs)
 

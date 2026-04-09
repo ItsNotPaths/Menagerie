@@ -38,6 +38,8 @@ proc itemType(itemId: string): string =
 
 proc itemValue(itemId: string): int =
   if itemId in content.items: return content.items[itemId].value
+  # TODO: calculate sell price factoring in equipped effects/perks
+  if itemId in content.armorPlates: return content.armorPlates[itemId].value
   0
 
 
@@ -61,28 +63,36 @@ proc activeEvents(state: var GameState): JsonNode =
   state.variables["_active_economic_events"] = kept
   kept
 
-proc calcBuyCost(state: GameState; baseCost: int): int =
-  ## Apply mercantile skill and buy_price_pct modifier to a base shop cost.
-  let mercPct = sk.skillPct(state, "mercantile")
-  result = max(1, int(round(baseCost.float * (1.5 - mercPct * 0.5))))
-  result = max(1, int(round(result.float * mods.modifierGet(state, "buy_price_pct"))))
+type TradeDir* = enum tdBuy, tdSell
 
-proc calcSellValue(state: GameState; baseVal: int): int =
-  ## Apply mercantile skill and sell_price_pct modifier to a base item value.
+proc calcTradePrice(state: GameState; baseCost: int; dir: TradeDir): int =
+  ## Apply mercantile skill and price modifier to baseCost.
+  ## tdBuy:  low mercantile = pay more  (multiplier 1.0–1.5)
+  ## tdSell: low mercantile = earn less (multiplier 0.5–1.0)
+  ## At 100% mercantile both directions converge to 1× base.
   let mercPct = sk.skillPct(state, "mercantile")
-  result = max(1, int(round(baseVal.float * (0.5 + mercPct * 0.5))))
-  result = max(1, int(round(result.float * mods.modifierGet(state, "sell_price_pct"))))
+  let mult = case dir
+    of tdBuy:  1.5 - mercPct * 0.5
+    of tdSell: 0.5 + mercPct * 0.5
+  result = max(1, int(round(baseCost.float * mult)))
+  let modKey = case dir
+    of tdBuy:  "buy_price_pct"
+    of tdSell: "sell_price_pct"
+  result = max(1, int(round(result.float * mods.modifierGet(state, modKey))))
 
-proc adjustedCost(state: var GameState; itemId: string; baseCost: int): int =
-  ## Scale buy price by all active economic events whose tag matches an item tag.
-  ## Each matching event's fluctuation is applied multiplicatively.
+proc adjustedCost*(state: var GameState; itemId: string; baseCost: int;
+                   dir: TradeDir): int =
+  ## Final trade price: mercantile + modifier, then additive economic events.
+  ## Event fluctuations are summed (not chained) before applying to the price.
+  result = calcTradePrice(state, baseCost, dir)
   let evList = activeEvents(state)
-  if evList.len == 0: return baseCost
+  if evList.len == 0: return
   var itemTags: seq[string]
   if itemId in content.items:
     itemTags.add content.items[itemId].itemType.toLowerAscii
-  ## also check typed event def for tag matching
-  var cost = baseCost.float
+  elif itemId in content.armorPlates:
+    itemTags.add "armor"
+  var eventPct = 0.0
   for ev in evList:
     let evId  = ev{"id"}.getStr
     let evTag = ev{"tag"}.getStr
@@ -93,8 +103,9 @@ proc adjustedCost(state: var GameState; itemId: string; baseCost: int): int =
       else:
         evTag in itemTags
     if matched:
-      cost = cost * (1.0 + ev{"fluctuation"}.getFloat(0.0))
-  max(1, int(round(cost)))
+      eventPct += ev{"fluctuation"}.getFloat(0.0)
+  if eventPct != 0.0:
+    result = max(1, int(round(result.float * (1.0 + eventPct))))
 
 
 proc applyEconomicEvent*(state: var GameState; eventId: string;
@@ -134,7 +145,7 @@ proc applyEconomicEvent*(state: var GameState; eventId: string;
 # ── Script API ────────────────────────────────────────────────────────────────
 # All procs here are wired as api.nim verbs and are Lua-callable.
 
-proc shopLines*(state: GameState): seq[string] =
+proc shopLines*(state: var GameState): seq[string] =
   ## Top-level shop view: category links + player sell panel.
   let shopId = state.variables.getOrDefault("_active_shop", newJNull()).getStr
   if shopId == "" or shopId notin content.shops:
@@ -163,7 +174,7 @@ proc shopLines*(state: GameState): seq[string] =
     if itemType(e.id) == "currency": continue
     let v = itemValue(e.id)
     if v > 0:
-      sellLines.add &"  [[{itemDisplay(e.id)} -- {calcSellValue(state, v)} {itemDisplay(currencyId)}:sell {e.id}]]"
+      sellLines.add &"  [[{itemDisplay(e.id)} -- {adjustedCost(state, e.id, v, tdSell)} {itemDisplay(currencyId)}:sell {e.id}]]"
   if sellLines.len > 0:
     lines.add ""
     lines.add "Your items:"
@@ -182,8 +193,8 @@ proc openShop*(state: var GameState; shopId: string): seq[string] =
   shopLines(state)
 
 
-proc shopCategoryLines*(state: GameState; category: string): seq[string] =
-  ## List trades for a given category.
+proc shopCategoryLines*(state: var GameState; category: string): seq[string] =
+  ## List trades for a given category, prices include mercantile + economic events.
   let shopId = state.variables.getOrDefault("_active_shop", newJNull()).getStr
   if shopId == "" or shopId notin content.shops:
     return @["(No shop active.)"]
@@ -198,7 +209,7 @@ proc shopCategoryLines*(state: GameState; category: string): seq[string] =
     if iType == "currency" or iType != category.toLowerAscii: continue
     let amount  = trade{"receive_amount"}.getInt(1)
     let curId   = trade{"currency_item"}.getStr(currencyId)
-    let cost    = calcBuyCost(state, trade{"cost"}.getInt(1))
+    let cost    = adjustedCost(state, itemId, trade{"cost"}.getInt(1), tdBuy)
     let qty     = if amount != 1: &"{amount}x " else: ""
     lines.add &"  [[{qty}{itemDisplay(itemId)} -- {cost} {itemDisplay(curId)}:buy {itemId}]]"
 
@@ -228,7 +239,7 @@ proc buyTrade*(state: var GameState; itemId: string): seq[string] =
   let baseCost = tradeNode{"cost"}.getInt(1)
   let rAmt     = tradeNode{"receive_amount"}.getInt(1)
 
-  var cost = calcBuyCost(state, baseCost)
+  var cost = adjustedCost(state, itemId, baseCost, tdBuy)
 
   if countItem(state, curId) < cost:
     return @[&"You need {cost} {itemDisplay(curId)}."]
@@ -249,7 +260,7 @@ proc sellItem*(state: var GameState; itemId: string): seq[string] =
   if baseVal <= 0:
     return @[&"{itemDisplay(itemId)} has no trade value."]
 
-  let val = calcSellValue(state, baseVal)
+  let val = adjustedCost(state, itemId, baseVal, tdSell)
 
   discard takeItem(state, itemId)
   for _ in 0 ..< val: giveItem(state, currencyId)
