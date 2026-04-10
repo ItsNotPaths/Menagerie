@@ -55,10 +55,13 @@ proc buildVFS*(plugins: seq[PluginEntry]): AssetVFS =
     if e.toolId == "assets":
       ## Dedicated assets plugin: the plugin folder IS the asset root.
       ## Walk it directly, skipping JSON metadata files.
+      ## Files inside a scripts/ subdir are always akScript regardless of extension.
+      let scriptsDir = e.folder / "scripts"
       for fp in walkDirRec(e.folder):
         if fp.endsWith(".json"): continue
         files.add fp
-        addEntry(result, lastPathPart(fp), assetKind(fp),
+        let kind = if fp.startsWith(scriptsDir): akScript else: assetKind(fp)
+        addEntry(result, lastPathPart(fp), kind,
                  AssetProvider(pluginName: e.name, pluginFolder: e.folder,
                                fullPath: fp))
     else:

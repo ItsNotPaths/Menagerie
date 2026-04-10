@@ -35,23 +35,25 @@ proc iterEntityPlates*(entityInv: JsonNode): seq[ArmorPlateDef] =
 proc fireEffectProcs*(state: var GameState; effects: var seq[ActiveEffect];
                       plates: seq[ArmorPlateDef]; effectId: string;
                       selfId: string): seq[string] =
-  ## Run armor plate effect_procs that react to effectId being applied.
+  ## Run effect_procs from armor plate perks that react to effectId being applied.
   ## Optionally consumes the trigger effect when consume: true.
   ## Proc format: {"effect": id, "chance": 0-100, "commands": [...], "consume": bool}
   if apiRunCommand == nil: return
   var shouldConsume = false
   for plate in plates:
-    let procs = plate.raw{"effect_procs"}
-    if procs == nil or procs.kind != JArray: continue
-    for p in procs:
-      if p{"effect"}.getStr != effectId: continue
-      let chance = p{"chance"}.getInt(100)
-      if chance < 100 and rand(99) >= chance: continue
-      let cmds = p{"commands"}
-      if cmds != nil and cmds.kind == JArray:
-        for c in cmds:
-          result &= apiRunCommand(state, c.getStr, selfId)
-      if p{"consume"}.getBool(false):
-        shouldConsume = true
+    for perkId in plate.perks:
+      let perkDef = content.getPerk(perkId)
+      let procs = perkDef.raw{"effect_procs"}
+      if procs == nil or procs.kind != JArray: continue
+      for p in procs:
+        if p{"effect"}.getStr != effectId: continue
+        let chance = p{"chance"}.getInt(100)
+        if chance < 100 and rand(99) >= chance: continue
+        let cmds = p{"commands"}
+        if cmds != nil and cmds.kind == JArray:
+          for c in cmds:
+            result &= apiRunCommand(state, c.getStr, selfId)
+        if p{"consume"}.getBool(false):
+          shouldConsume = true
   if shouldConsume:
     effects.keepIf(proc(e: ActiveEffect): bool = e.id != effectId)

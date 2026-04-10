@@ -7,6 +7,7 @@ import std/[sequtils, strformat, strutils, tables]
 import engine/state
 import engine/content
 import engine/items
+import engine/modifiers
 import commands/core
 import engine/api
 
@@ -215,10 +216,17 @@ proc cmdEquip(state: var GameState; args: seq[string]): CmdResult =
   elif slot in armorSlotOrder:
     if info.itemType != "armor":
       return err(&"{name} is not an armor piece.")
+    # Fire on_unequip for any plate currently in this slot
+    let prevId = p[].armor.getOrDefault(slot, "")
+    if prevId != "" and prevId in content.armorPlates:
+      discard modifiers.fireEvent(state, "unequip", "player")
+    # Also remove the plate from any other slot it may occupy (re-equip elsewhere)
     for s in armorSlotOrder:
       if p[].armor.getOrDefault(s, "") == itemId:
         p[].armor.del(s)
     p[].armor[slot] = itemId
+    # Fire on_equip for the newly equipped plate's perks
+    discard modifiers.fireEvent(state, "equip", "player")
 
   else:
     return err(&"Unknown slot '{slot}'.")
@@ -280,6 +288,9 @@ proc cmdUnequip(state: var GameState; args: seq[string]): CmdResult =
     if itemId == "":
       return err(&"Nothing equipped in {slot}.")
     let name = anyItem(itemId).displayName
+    # Fire on_unequip before removing the plate so its perks are still active
+    if itemId in content.armorPlates:
+      discard modifiers.fireEvent(state, "unequip", "player")
     p[].armor.del(slot)
     let fresh = itemDetailLines(state, itemId)
     return CmdResult(lines: @[&"Unequipped {name} from {slot}."],

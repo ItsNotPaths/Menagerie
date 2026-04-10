@@ -72,10 +72,16 @@ type
     blocks*:   seq[TileBlock]
     raw*:      JsonNode   ## full JSON (connections list, etc.)
 
+  PerkDef* = object
+    id*, displayName*, description*: string
+    modifiers*:                      JsonNode   ## {modifier_key: float_value}
+    raw*:                            JsonNode   ## full JSON (on_<event>, effect_procs)
+
   ArmorPlateDef* = object
     id*, displayName*, zone*: string
     defense*, value*:         int
-    raw*:                     JsonNode   ## procs array
+    perks*:                   seq[string]   ## perk ids granted while this plate is worn
+    raw*:                     JsonNode
 
   ShopDef* = object
     id*:  string
@@ -126,8 +132,9 @@ var
   items*:         Table[string, ItemDef]
   craftingIndex*: Table[string, seq[string]]   ## station tag → ordered item id list
   spells*:        Table[string, SpellDef]
-  effects*:     Table[string, EffectDef]
-  npcs*:        Table[string, NpcDef]
+  effects*:       Table[string, EffectDef]
+  perks*:         Table[string, PerkDef]
+  npcs*:          Table[string, NpcDef]
   rooms*:       Table[string, RoomDef]
   encounters*:  Table[string, EncounterDef]
   tilesDefs*:   Table[string, TileDef]
@@ -216,6 +223,20 @@ proc loadEffects(dir: string) =
       modifiers:        if d.hasKey("modifiers"): d["modifiers"] else: newJNull(),
       onKill:           strSeq(d{"on_kill"}),
       raw:              d,
+    )
+
+proc loadPerks(dir: string) =
+  for f in walkFiles(dir / "perks/*.json"):
+    let d = loadJson(f)
+    if d.kind != JObject: continue
+    let id = d{"id"}.getStr
+    if id == "": continue
+    perks[id] = PerkDef(
+      id:          id,
+      displayName: d{"display_name"}.getStr(d{"name"}.getStr(id)),
+      description: d{"description"}.getStr,
+      modifiers:   if d.hasKey("modifiers"): d["modifiers"] else: newJNull(),
+      raw:         d,
     )
 
 proc loadNpcs(dir: string) =
@@ -318,6 +339,7 @@ proc loadArmorPlates(dir: string) =
       zone:        d{"zone"}.getStr,
       defense:     d{"defense"}.getInt(0),
       value:       d{"value"}.getInt(0),
+      perks:       strSeq(d{"perks"}),
       raw:         d,
     )
 
@@ -430,7 +452,7 @@ proc loadContent*(contentDir: string) =
     log(Game, Error, "content: directory not found: " & contentDir)
     return
 
-  const subdirs = ["items", "spells", "effects", "npcs", "rooms",
+  const subdirs = ["items", "spells", "effects", "perks", "npcs", "rooms",
                    "encounters", "tiles", "armor_plates", "shops",
                    "economic_events", "ai_packages", "quests", "world"]
   for sub in subdirs:
@@ -440,6 +462,7 @@ proc loadContent*(contentDir: string) =
   loadItems(contentDir)
   loadSpells(contentDir)
   loadEffects(contentDir)
+  loadPerks(contentDir)
   loadNpcs(contentDir)
   loadRooms(contentDir)
   loadEncounters(contentDir)
@@ -457,6 +480,7 @@ proc loadContent*(contentDir: string) =
     $items.len & " items, " &
     $spells.len & " spells, " &
     $effects.len & " effects, " &
+    $perks.len & " perks, " &
     $npcs.len & " npcs, " &
     $rooms.len & " rooms, " &
     $encounters.len & " encounters, " &
@@ -494,6 +518,12 @@ proc getEffect*(id: string): EffectDef =
   else:
     log(Game, Warn, "content: effect not found: " & id)
     EffectDef(id: id)
+
+proc getPerk*(id: string): PerkDef =
+  if id in perks: perks[id]
+  else:
+    log(Game, Warn, "content: perk not found: " & id)
+    PerkDef(id: id)
 
 proc getNpc*(id: string): NpcDef =
   if id in npcs: npcs[id]

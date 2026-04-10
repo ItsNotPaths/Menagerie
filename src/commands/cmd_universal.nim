@@ -12,6 +12,7 @@ import engine/world
 import engine/saves
 import engine/skills
 import engine/items
+import engine/armor
 import engine/api
 import commands/core
 
@@ -174,27 +175,60 @@ proc cmdLevelupPerk(state: var GameState; args: seq[string]): CmdResult =
             panelLines: skillsLines(state), panelAppend: true)
 
 
+proc perkModifierLine(modifiers: JsonNode): string =
+  if modifiers == nil or modifiers.kind != JObject: return ""
+  var mods: seq[string]
+  for k, v in modifiers.pairs:
+    let fv   = v.getFloat
+    let sign = if fv >= 0.0: "+" else: ""
+    mods.add &"{k} {sign}{fv}"
+  if mods.len > 0: mods.join(", ") else: ""
+
+
 proc cmdPerks(state: var GameState; args: seq[string]): CmdResult =
-  let perks = state.player.effects.filterIt(it.ticksRemaining == -1)
   var lines: seq[string]
-  if perks.len == 0:
-    lines.add "  No perks active."
-  else:
-    for e in perks:
-      let def = content.getEffect(e.id)
+  var anyShown = false
+
+  # ── Level-up perks (permanent effects) ───────────────────────────────────────
+  let gained = state.player.effects.filterIt(it.ticksRemaining == -1)
+  if gained.len > 0:
+    lines.add "  Gained Perks"
+    lines.add ""
+    for e in gained:
+      let def  = content.getEffect(e.id)
       let name = if def.displayName.len > 0: def.displayName else: e.id
-      lines.add &"  {name}"
+      lines.add &"    {name}"
       if def.description.len > 0:
-        lines.add &"    {def.description}"
-      if def.modifiers != nil and def.modifiers.kind == JObject:
-        var mods: seq[string]
-        for k, v in def.modifiers.pairs:
-          let fv = v.getFloat
-          let sign = if fv >= 0.0: "+" else: ""
-          mods.add &"{k} {sign}{fv}"
-        if mods.len > 0:
-          lines.add &"    Modifiers: {mods.join(\", \")}"
+        lines.add &"      {def.description}"
+      let ml = perkModifierLine(def.modifiers)
+      if ml.len > 0:
+        lines.add &"      Modifiers: {ml}"
       lines.add ""
+    anyShown = true
+
+  # ── Armor-sourced perks ───────────────────────────────────────────────────────
+  let plates = armor.iterEquippedPlates(state)
+  for plate in plates:
+    if plate.perks.len == 0: continue
+    if not anyShown:
+      lines.add ""
+    lines.add &"  From {plate.displayName}"
+    lines.add ""
+    for perkId in plate.perks:
+      let def  = content.getPerk(perkId)
+      let name = if def.displayName.len > 0: def.displayName else: perkId
+      lines.add &"    {name}"
+      if def.description.len > 0:
+        lines.add &"      {def.description}"
+      let ml = perkModifierLine(def.modifiers)
+      if ml.len > 0:
+        lines.add &"      Modifiers: {ml}"
+      lines.add ""
+    anyShown = true
+
+  if not anyShown:
+    lines.add "  No perks active."
+
   if state.player.pendingPerkPicks > 0:
     lines &= perkPickPrompt()
   ok(lines)

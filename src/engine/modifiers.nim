@@ -19,7 +19,9 @@ import armor as armormod
 # ── Modifier accumulation ─────────────────────────────────────────────────────
 
 proc modifierGet*(state: GameState; key: string): float =
-  ## Multiplicative product of (1 + modifiers[key]) over all permanent effects.
+  ## Multiplicative product of (1 + modifiers[key]) over:
+  ##   1. Permanent player effects (perks granted by level-up, ticksRemaining == -1)
+  ##   2. Perks granted by currently equipped armor plates
   ## Returns 1.0 when nothing modifies this key.
   ## Two perks at +0.15 → 1.15 × 1.15 = 1.3225.
   result = 1.0
@@ -29,6 +31,12 @@ proc modifierGet*(state: GameState; key: string): float =
     if def.modifiers == nil or def.modifiers.kind != JObject: continue
     if def.modifiers.hasKey(key):
       result *= (1.0 + def.modifiers[key].getFloat(0))
+  for plate in armormod.iterEquippedPlates(state):
+    for perkId in plate.perks:
+      let def = content.getPerk(perkId)
+      if def.modifiers == nil or def.modifiers.kind != JObject: continue
+      if def.modifiers.hasKey(key):
+        result *= (1.0 + def.modifiers[key].getFloat(0))
 
 
 # ── Event context ─────────────────────────────────────────────────────────────
@@ -132,8 +140,8 @@ proc dispatchHandler(state: var GameState; handler: JsonNode;
 
 proc fireEvent*(state: var GameState; event: string; selfId: string): seq[string] =
   ## Write event context then dispatch on_<event> for:
-  ##   1. Permanent player effects (perks, ticksRemaining == -1)
-  ##   2. Equipped armor plates
+  ##   1. Permanent player effects (perks granted by level-up, ticksRemaining == -1)
+  ##   2. Perks granted by currently equipped armor plates
   if apiRunCommand == nil: return
   writeEventContext(state, event, selfId)
   let key = "on_" & event
@@ -144,4 +152,6 @@ proc fireEvent*(state: var GameState; event: string; selfId: string): seq[string
     result &= dispatchHandler(state, def.raw{key}, selfId)
 
   for plate in armormod.iterEquippedPlates(state):
-    result &= dispatchHandler(state, plate.raw{key}, selfId)
+    for perkId in plate.perks:
+      let def = content.getPerk(perkId)
+      result &= dispatchHandler(state, def.raw{key}, selfId)
