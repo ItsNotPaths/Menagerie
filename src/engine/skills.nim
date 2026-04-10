@@ -81,22 +81,18 @@ proc trainSkill*(state: var GameState; name: string; amount: int) =
 
 proc skillPickPrompt*(state: GameState): seq[string] =
   result.add "  Choose a skill to improve:"
-  var links: seq[string]
   for s in SKILL_NAMES:
-    links.add &"[[{toTitleCase(s)} ({skillVal(state, s)}):levelup_skill {s}]]"
-  result.add "  " & links.join("   ")
+    result.add &"    [[{toTitleCase(s)} ({skillVal(state, s)}):levelup_skill {s}]]"
 
 proc statPickPrompt*(state: GameState): seq[string] =
   let p = state.player
   result.add "  Choose a stat to improve:"
-  var links: seq[string]
   for s in STAT_OPTIONS:
     let (cur, mx) = case s
       of "health":  (int(p.health),  int(p.maxHealth))
       of "stamina": (int(p.stamina), int(p.maxStamina))
       else:         (int(p.focus),   int(p.maxFocus))
-    links.add &"[[{toTitleCase(s)} ({cur}/{mx}):levelup_stat {s}]]"
-  result.add "  " & links.join("   ")
+    result.add &"    [[{toTitleCase(s)} ({cur}/{mx}):levelup_stat {s}]]"
 
 proc perkPickPrompt*(): seq[string] =
   result.add "  A perk pick is available. Use [[perks]] to view active perks."
@@ -130,8 +126,7 @@ proc giveXp*(state: var GameState; amount: float): seq[string] =
     result.add &"  Level {state.player.level}!"
     result &= mods.fireEvent(state, "level_up", "player")
   if state.player.pendingSkillPicks > 0:
-    result.add ""
-    result &= skillPickPrompt(state)
+    result.add "  Skill pick available — open [[skills]] to choose."
   if state.player.pendingPerkPicks > 0:
     result.add ""
     result &= perkPickPrompt()

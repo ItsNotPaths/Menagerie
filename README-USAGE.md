@@ -73,6 +73,7 @@ Plugin source files live in `data/<modpack>/<PluginFolder>/<plugin>.json`. Runni
 | `content/rooms/` | Room definitions |
 | `content/tiles/` | Tile composition files for named locations |
 | `content/world/` | `world_def.json` — road network and named tile placement |
+| `content/asset_index.json` | Flat basename→path map for all images/sprites (all source categories merged) |
 | `content/images/` | Room/location images |
 
 ---

@@ -269,6 +269,8 @@ data/<modpack>/
     scripts/                   Lua scripts
 ```
 
+**Asset categories (`assets/rooms/`, `assets/tiles/`, `assets/sprites/`)** are used by the assets driver to build `content/asset_index.json`. At load time (`content.nim:loadAssetIndex`) all categories are merged into a single flat table keyed by basename — the category distinctions are stripped. This means a file in `assets/rooms/` can be referenced by a tile's `image` field and vice versa; the engine only looks up the basename, not the source category.
+
 **Tool IDs:** `world-tool`, `room-editor`, `gameplay-vars`, `inkwell`
 
 **Driver interface (`world-tools/drivers/<name>/<name>.lua`):**

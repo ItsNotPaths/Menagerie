@@ -125,24 +125,35 @@ proc cmdSkills(state: var GameState; args: seq[string]): CmdResult =
   CmdResult(panelLines: skillsLines(state))
 
 
+proc inRestRoom(state: GameState): bool =
+  let room = getRoom(state.player.currentRoom)
+  room.raw != nil and room.raw{"type"}.getStr == "rest"
+
 proc cmdLevelupSkill(state: var GameState; args: seq[string]): CmdResult =
   if state.player.pendingSkillPicks <= 0:
     return err("No skill pick pending.")
+  if gvInt("level_up_sleep_only", 0) == 1 and not inRestRoom(state):
+    return err("You must rest to consolidate your gains.")
   if args.len == 0:
-    return ok(skillPickPrompt(state))
+    return CmdResult(panelLines: skillsLines(state))
   let name = args[0].toLowerAscii
   if name notin SKILL_NAMES:
     return err(&"Unknown skill '{name}'. Type [[skills]] to see options.")
   trainSkill(state, name, SKILL_BUMP)
   dec state.player.pendingSkillPicks
   let newVal = skillVal(state, name)
-  CmdResult(lines: @[&"  {toTitleCase(name)} improved to {newVal}."],
-            panelLines: skillsLines(state), panelAppend: true)
+  var lines = @[&"  {toTitleCase(name)} improved to {newVal}."]
+  if state.player.pendingStatPicks > 0:
+    lines.add ""
+    lines &= statPickPrompt(state)
+  CmdResult(lines: lines, panelLines: skillsLines(state))
 
 
 proc cmdLevelupStat(state: var GameState; args: seq[string]): CmdResult =
   if state.player.pendingStatPicks <= 0:
     return err("No stat pick pending.")
+  if gvInt("level_up_sleep_only", 0) == 1 and not inRestRoom(state):
+    return err("You must rest to consolidate your gains.")
   if args.len == 0:
     return ok(statPickPrompt(state))
   let stat = args[0].toLowerAscii
