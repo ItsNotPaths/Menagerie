@@ -28,13 +28,15 @@
 ##   On change: flushDirty(state, key) writes state.dirty[key] back immediately
 ##   On save:   flushToWorking writes all in-memory dirty entries; zip picks up everything
 
-import std/[json, os, strutils, times, algorithm, tables, random]
+import std/[json, os, strutils, times, algorithm, tables, random, sequtils]
 import zippy/ziparchives
 import zippy/ziparchives_v1
 import state
 import content
 import skills
 import gameplay_vars
+import items
+import api
 import log
 
 
@@ -385,6 +387,37 @@ proc clearWorkingOnLaunch*() =
   clearWorking()
 
 
+proc applyClass*(state: var GameState; cd: content.ClassDef) =
+  ## Apply a ClassDef's overrides to player state.
+  ## Stats with value 0 are left at their current (gameplay_vars default) values.
+  ## Called by cmd_charselect and by newGame auto-apply.
+  let s = cd.stats
+  if s != nil and s.kind == JObject:
+    template applyFloat(key: string; field: untyped) =
+      if s.hasKey(key):
+        let v = s[key].getFloat(0)
+        if v > 0: state.player.field = v
+    applyFloat("health",      health)
+    applyFloat("max_health",  maxHealth)
+    applyFloat("stamina",     stamina)
+    applyFloat("max_stamina", maxStamina)
+    applyFloat("focus",       focus)
+    applyFloat("max_focus",   maxFocus)
+  for name, val in cd.skills:
+    if name in skills.SKILL_NAMES:
+      state.player.skills[name] = clamp(val, 0, skills.SKILL_CAP)
+  for (iid, count) in cd.items:
+    for _ in 1..max(1, count):
+      items.giveItem(state, iid)
+  for spellId in cd.spells:
+    if spellId notin state.player.spellbook:
+      state.player.spellbook.add spellId
+  for perkId in cd.perks:
+    discard api.runCommand(state, "add_effect player " & perkId & " -1", "player")
+  if cd.startingPosition != (0, 0):
+    state.player.position = cd.startingPosition
+
+
 proc newGame*(state: var GameState) =
   ## Initialise state for a fresh playthrough. Generates world seed, sets
   ## stat defaults from gameplay_vars, writes working directory.
@@ -396,16 +429,29 @@ proc newGame*(state: var GameState) =
   state.player.maxStamina = gvFloat("player_stamina_max", 100.0)
   state.player.focus      = gvFloat("player_focus",        50.0)
   state.player.maxFocus   = gvFloat("player_focus_max",    50.0)
-  let startGold = gvInt("new_game_gold", 50)
-  if startGold > 0:
-    state.player.inventory.add InventoryEntry(id: "currency", slots: 0, count: startGold)
   state.player.hunger     = gvFloat("new_game_hunger",     100.0)
   for name in skills.SKILL_NAMES:
     state.player.skills[name] = 0
   state.variables  = {"world_seed": %rand(2147483647), "_npc_spawn_counter": %0}.toTable
   state.dirty      = initTable[string, JsonNode]()
   state.npcStates  = buildNpcStates()
-  state.context    = ctxWorld
+
+  let classCount = content.classes.len
+  let autoApply  = gvInt("auto_apply_single_class", 0)
+  if classCount == 0:
+    # No classes defined — fall back to current behaviour, give default gold
+    let startGold = gvInt("new_game_gold", 50)
+    if startGold > 0:
+      state.player.inventory.add InventoryEntry(id: "currency", slots: 0, count: startGold)
+    state.context = ctxWorld
+  elif classCount == 1 and autoApply == 1:
+    # Single class + auto_apply_single_class = 1 → silently apply, skip UI
+    applyClass(state, toSeq(content.classes.values)[0])
+    state.context = ctxWorld
+  else:
+    # Show character creation screen
+    state.context = ctxCharCreate
+
   flushToWorking(state)
 
 

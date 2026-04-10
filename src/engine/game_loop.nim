@@ -28,6 +28,7 @@ import ../commands/cmd_debug
 import ../commands/cmd_spells
 import ../commands/cmd_menu
 import ../commands/cmd_journal
+import ../commands/cmd_charselect
 import ../ui/ipc
 
 
@@ -114,6 +115,7 @@ proc gameThread(contentDir: string) {.thread.} =
     initCmdSpells()
     initCmdMenu()
     initCmdJournal()
+    initCmdCharSelect()
 
     initApi()
 

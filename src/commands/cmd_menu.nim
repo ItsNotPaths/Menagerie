@@ -22,6 +22,10 @@ proc cmdMenuLook(state: var GameState; args: seq[string]): CmdResult =
 
 proc cmdNew(state: var GameState; args: seq[string]): CmdResult =
   saves.newGame(state)
+  if state.context == ctxCharCreate:
+    return CmdResult(lines: @["A new journey awaits.", "",
+                               "Choose your background with [[list_classes]]."],
+                     prefill: "list_classes")
   let lines = @["A new journey begins.", ""] & world.currentLines(state)
   CmdResult(lines: lines, imagePath: currentImage(state))
 

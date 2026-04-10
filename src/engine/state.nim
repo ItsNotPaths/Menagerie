@@ -124,7 +124,7 @@ type
 
 
   GameContext* = enum
-    ctxMenu, ctxWorld, ctxTown, ctxDungeon, ctxCombat, ctxDialogue
+    ctxMenu, ctxWorld, ctxTown, ctxDungeon, ctxCombat, ctxDialogue, ctxCharCreate
 
 
   GameState* = object

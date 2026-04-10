@@ -125,6 +125,15 @@ type
     files*:   Table[string, string]   ## filename → absolute path (all asset types)
     scripts*: Table[string, string]
 
+  ClassDef* = object
+    id*, displayName*, description*: string
+    stats*:            JsonNode              ## {stat_key: float}; nil = no overrides
+    skills*:           Table[string, int]
+    items*:            seq[tuple[id: string; count: int]]
+    spells*:           seq[string]
+    perks*:            seq[string]
+    startingPosition*: (int, int)            ## (0,0) = use initPlayerState default
+
 
 # ── Module-level content tables ───────────────────────────────────────────────
 
@@ -143,6 +152,7 @@ var
   economicEvents*: Table[string, EconomicEventDef]
   aiPackages*:     Table[string, AiPackageDef]
   quests*:      Table[string, QuestDef]
+  classes*:     Table[string, ClassDef]
   worldDef*:    WorldDef
   assetIndex*:  AssetIndex
 
@@ -407,6 +417,38 @@ proc loadWorldDef(dir: string) =
         deleted:          t{"deleted"}.getBool(false),
       )
 
+proc loadClasses(dir: string) =
+  for f in walkFiles(dir / "classes/*.json"):
+    let d = loadJson(f)
+    if d.kind != JObject: continue
+    let id = d{"id"}.getStr(f.splitFile.name)
+    if id == "": continue
+    var skillTable: Table[string, int]
+    let js = d{"skills"}
+    if js != nil and js.kind == JObject:
+      for name, val in js: skillTable[name] = val.getInt(0)
+    var itemList: seq[tuple[id: string; count: int]]
+    let ji = d{"items"}
+    if ji != nil and ji.kind == JArray:
+      for entry in ji:
+        let iid = entry{"id"}.getStr
+        if iid != "": itemList.add (id: iid, count: entry{"count"}.getInt(1))
+    let sp = d{"starting_position"}
+    let sx = if sp != nil and sp.kind == JArray and sp.len >= 2: sp[0].getInt(0) else: 0
+    let sy = if sp != nil and sp.kind == JArray and sp.len >= 2: sp[1].getInt(0) else: 0
+    classes[id] = ClassDef(
+      id:               id,
+      displayName:      d{"display_name"}.getStr(id),
+      description:      d{"description"}.getStr,
+      stats:            d{"stats"},
+      skills:           skillTable,
+      items:            itemList,
+      spells:           strSeq(d{"spells"}),
+      perks:            strSeq(d{"perks"}),
+      startingPosition: (sx, sy),
+    )
+
+
 proc loadAssetIndex(dir: string) =
   let path = dir / "asset_index.json"
   if not fileExists(path):
@@ -472,6 +514,7 @@ proc loadContent*(contentDir: string) =
   loadEconomicEvents(contentDir)
   loadAiPackages(contentDir)
   loadQuests(contentDir)
+  loadClasses(contentDir)
   loadWorldDef(contentDir)
   loadAssetIndex(contentDir)
   generateRoomKeys()
@@ -490,6 +533,7 @@ proc loadContent*(contentDir: string) =
     $economicEvents.len & " economic events, " &
     $aiPackages.len & " ai packages, " &
     $quests.len & " quests, " &
+    $classes.len & " classes, " &
     $worldDef.tiles.len & " world tiles")
 
 
@@ -536,6 +580,12 @@ proc getRoom*(id: string): RoomDef =
   else:
     log(Game, Warn, "content: room not found: " & id)
     RoomDef(id: id)
+
+proc getClass*(id: string): ClassDef =
+  if id in classes: classes[id]
+  else:
+    log(Game, Warn, "content: class not found: " & id)
+    ClassDef(id: id)
 
 proc getEncounter*(id: string): EncounterDef =
   if id in encounters: encounters[id]

@@ -112,7 +112,7 @@ proc currentImage*(state: GameState): string =
   of ctxWorld:
     let (x, y) = state.player.position
     tileImagePath(state, x, y)
-  else:
+  of ctxCharCreate, ctxMenu, ctxDialogue:
     ""
 
 
