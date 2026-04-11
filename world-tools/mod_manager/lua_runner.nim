@@ -15,7 +15,7 @@ const luaSrcDir = currentSourcePath.parentDir / ".." / ".." / "vendor" / "lua" /
 # ── Lua C API types ───────────────────────────────────────────────────────────
 
 type
-  LuaState   {.importc: "lua_State",   header: luaSrcDir & "/lua.h".}   = object
+  LuaState   {.importc: "lua_State",   header: "lua.h".}   = object
   LuaStatePtr* = ptr LuaState
   LuaCFunction* = proc(L: LuaStatePtr): cint {.cdecl.}
 
@@ -35,69 +35,69 @@ const
 # ── Lua C API bindings ────────────────────────────────────────────────────────
 
 proc luaL_newstate*(): LuaStatePtr
-  {.importc: "luaL_newstate", header: luaSrcDir & "/lualib.h".}
+  {.importc: "luaL_newstate", header: "lualib.h".}
 proc luaL_openlibs*(L: LuaStatePtr)
-  {.importc: "luaL_openlibs", header: luaSrcDir & "/lualib.h".}
+  {.importc: "luaL_openlibs", header: "lualib.h".}
 proc lua_close*(L: LuaStatePtr)
-  {.importc: "lua_close", header: luaSrcDir & "/lua.h".}
+  {.importc: "lua_close", header: "lua.h".}
 proc luaL_loadfilex*(L: LuaStatePtr; filename, mode: cstring): cint
-  {.importc: "luaL_loadfilex", header: luaSrcDir & "/lauxlib.h".}
+  {.importc: "luaL_loadfilex", header: "lauxlib.h".}
 proc lua_pcallk*(L: LuaStatePtr; nargs, nresults, msgh, ctx: cint; k: pointer): cint
-  {.importc: "lua_pcallk", header: luaSrcDir & "/lua.h".}
+  {.importc: "lua_pcallk", header: "lua.h".}
 
 proc lua_gettop*(L: LuaStatePtr): cint
-  {.importc: "lua_gettop", header: luaSrcDir & "/lua.h".}
+  {.importc: "lua_gettop", header: "lua.h".}
 proc lua_settop*(L: LuaStatePtr; idx: cint)
-  {.importc: "lua_settop", header: luaSrcDir & "/lua.h".}
+  {.importc: "lua_settop", header: "lua.h".}
 proc lua_type*(L: LuaStatePtr; idx: cint): cint
-  {.importc: "lua_type", header: luaSrcDir & "/lua.h".}
+  {.importc: "lua_type", header: "lua.h".}
 
 proc lua_pushnil*(L: LuaStatePtr)
-  {.importc: "lua_pushnil", header: luaSrcDir & "/lua.h".}
+  {.importc: "lua_pushnil", header: "lua.h".}
 proc lua_pushboolean*(L: LuaStatePtr; b: cint)
-  {.importc: "lua_pushboolean", header: luaSrcDir & "/lua.h".}
+  {.importc: "lua_pushboolean", header: "lua.h".}
 proc lua_pushnumber*(L: LuaStatePtr; n: cdouble)
-  {.importc: "lua_pushnumber", header: luaSrcDir & "/lua.h".}
+  {.importc: "lua_pushnumber", header: "lua.h".}
 proc lua_pushinteger*(L: LuaStatePtr; n: int64)
-  {.importc: "lua_pushinteger", header: luaSrcDir & "/lua.h".}
+  {.importc: "lua_pushinteger", header: "lua.h".}
 proc lua_pushstring*(L: LuaStatePtr; s: cstring): cstring
-  {.importc: "lua_pushstring", header: luaSrcDir & "/lua.h", discardable.}
+  {.importc: "lua_pushstring", header: "lua.h", discardable.}
 proc lua_pushvalue*(L: LuaStatePtr; idx: cint)
-  {.importc: "lua_pushvalue", header: luaSrcDir & "/lua.h".}
+  {.importc: "lua_pushvalue", header: "lua.h".}
 proc lua_pushcclosure*(L: LuaStatePtr; fn: LuaCFunction; n: cint)
-  {.importc: "lua_pushcclosure", header: luaSrcDir & "/lua.h".}
+  {.importc: "lua_pushcclosure", header: "lua.h".}
 
 proc lua_toboolean*(L: LuaStatePtr; idx: cint): cint
-  {.importc: "lua_toboolean", header: luaSrcDir & "/lua.h".}
+  {.importc: "lua_toboolean", header: "lua.h".}
 proc lua_tonumberx*(L: LuaStatePtr; idx: cint; isnum: ptr cint): cdouble
-  {.importc: "lua_tonumberx", header: luaSrcDir & "/lua.h".}
+  {.importc: "lua_tonumberx", header: "lua.h".}
 proc lua_tointegerx*(L: LuaStatePtr; idx: cint; isnum: ptr cint): int64
-  {.importc: "lua_tointegerx", header: luaSrcDir & "/lua.h".}
+  {.importc: "lua_tointegerx", header: "lua.h".}
 proc lua_tolstring*(L: LuaStatePtr; idx: cint; len: ptr csize_t): cstring
-  {.importc: "lua_tolstring", header: luaSrcDir & "/lua.h".}
+  {.importc: "lua_tolstring", header: "lua.h".}
 proc lua_isinteger*(L: LuaStatePtr; idx: cint): cint
-  {.importc: "lua_isinteger", header: luaSrcDir & "/lua.h".}
+  {.importc: "lua_isinteger", header: "lua.h".}
 proc lua_rawlen*(L: LuaStatePtr; idx: cint): csize_t
-  {.importc: "lua_rawlen", header: luaSrcDir & "/lua.h".}
+  {.importc: "lua_rawlen", header: "lua.h".}
 
 proc lua_newtable*(L: LuaStatePtr)
-  {.importc: "lua_newtable", header: luaSrcDir & "/lua.h".}
+  {.importc: "lua_newtable", header: "lua.h".}
 proc lua_settable*(L: LuaStatePtr; idx: cint)
-  {.importc: "lua_settable", header: luaSrcDir & "/lua.h".}
+  {.importc: "lua_settable", header: "lua.h".}
 proc lua_setfield*(L: LuaStatePtr; idx: cint; k: cstring)
-  {.importc: "lua_setfield", header: luaSrcDir & "/lua.h".}
+  {.importc: "lua_setfield", header: "lua.h".}
 proc lua_getfield*(L: LuaStatePtr; idx: cint; k: cstring): cint
-  {.importc: "lua_getfield", header: luaSrcDir & "/lua.h", discardable.}
+  {.importc: "lua_getfield", header: "lua.h", discardable.}
 proc lua_setglobal*(L: LuaStatePtr; name: cstring)
-  {.importc: "lua_setglobal", header: luaSrcDir & "/lua.h".}
+  {.importc: "lua_setglobal", header: "lua.h".}
 proc lua_getglobal*(L: LuaStatePtr; name: cstring): cint
-  {.importc: "lua_getglobal", header: luaSrcDir & "/lua.h", discardable.}
+  {.importc: "lua_getglobal", header: "lua.h", discardable.}
 proc lua_rawgeti*(L: LuaStatePtr; idx: cint; n: int64): cint
-  {.importc: "lua_rawgeti", header: luaSrcDir & "/lua.h", discardable.}
+  {.importc: "lua_rawgeti", header: "lua.h", discardable.}
 proc lua_rawseti*(L: LuaStatePtr; idx, n: cint)
-  {.importc: "lua_rawseti", header: luaSrcDir & "/lua.h".}
+  {.importc: "lua_rawseti", header: "lua.h".}
 proc lua_next*(L: LuaStatePtr; idx: cint): cint
-  {.importc: "lua_next", header: luaSrcDir & "/lua.h".}
+  {.importc: "lua_next", header: "lua.h".}
 
 # ── Nim-friendly wrappers ─────────────────────────────────────────────────────
 
