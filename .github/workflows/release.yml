@@ -246,7 +246,7 @@ jobs:
       - name: Create stub libdl for cross-compilation
         run: |
           echo "" | x86_64-w64-mingw32-as -o /tmp/empty.o
-          x86_64-w64-mingw32-ar rcs /usr/x86_64-w64-mingw32/lib/libdl.a /tmp/empty.o
+          sudo x86_64-w64-mingw32-ar rcs /usr/x86_64-w64-mingw32/lib/libdl.a /tmp/empty.o
 
       - name: Compile Windows binaries
         run: |
