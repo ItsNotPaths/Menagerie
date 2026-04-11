@@ -241,6 +241,13 @@ jobs:
           curl -fsSL "https://github.com/libsdl-org/SDL_image/releases/download/release-2.8.8/SDL2_image-devel-2.8.8-mingw.tar.gz" \
             | tar xz --strip-components=1 -C /opt/sdl2-mingw
 
+      # Nim's global config unconditionally passes -ldl even when targeting Windows.
+      # Create an empty stub so the linker is satisfied (Windows uses LoadLibrary, not dlopen).
+      - name: Create stub libdl for cross-compilation
+        run: |
+          echo "" | x86_64-w64-mingw32-as -o /tmp/empty.o
+          x86_64-w64-mingw32-ar rcs /usr/x86_64-w64-mingw32/lib/libdl.a /tmp/empty.o
+
       - name: Compile Windows binaries
         run: |
           cp docker-build/nim-windows.cfg nim.cfg
