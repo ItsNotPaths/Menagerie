@@ -4,7 +4,7 @@
 ## Player picks a class with `choose <id>` then transitions to ctxWorld.
 ## Call initCmdCharSelect() from game_loop.
 
-import std/[algorithm, sequtils, strformat, tables]
+import std/[algorithm, sequtils, strformat, strutils, tables]
 import engine/state
 import engine/content
 import engine/world

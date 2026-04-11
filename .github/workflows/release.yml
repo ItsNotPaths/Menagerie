@@ -27,6 +27,8 @@ jobs:
   build-linux:
     runs-on: ubuntu-latest
     container: ubuntu:20.04
+    env:
+      DEBIAN_FRONTEND: noninteractive  # prevent apt-get from hanging on timezone prompts
 
     steps:
       # ubuntu:20.04 is minimal — install git + curl before checkout
