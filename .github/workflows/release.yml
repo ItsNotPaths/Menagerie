@@ -31,13 +31,20 @@ jobs:
       DEBIAN_FRONTEND: noninteractive  # prevent apt-get from hanging on timezone prompts
 
     steps:
-      # ubuntu:20.04 is minimal — install git + curl before checkout
+      # ubuntu:20.04 is minimal — install git + curl + unzip before checkout
       - name: Install git and core tools
         run: |
           apt-get update -qq
-          apt-get install -y git curl ca-certificates
+          apt-get install -y git curl ca-certificates unzip
 
       - uses: actions/checkout@v4
+
+      - name: Download game data
+        run: |
+          curl -fsSL "https://github.com/ItsNotPaths/Menagerie/releases/download/data/data-release.zip" \
+            -o data-release.zip
+          unzip -q data-release.zip
+          rm data-release.zip
 
       # All SDL2 backend headers and codec libs — mirrors docker-build/Dockerfile
       - name: Install build dependencies
@@ -179,6 +186,13 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+
+      - name: Download game data
+        run: |
+          curl -fsSL "https://github.com/ItsNotPaths/Menagerie/releases/download/data/data-release.zip" \
+            -o data-release.zip
+          unzip -q data-release.zip
+          rm data-release.zip
 
       - name: Restore vendor cache
         id: vendor-cache
