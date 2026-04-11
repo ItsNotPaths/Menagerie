@@ -245,7 +245,7 @@ jobs:
       # Create an empty stub so the linker is satisfied (Windows uses LoadLibrary, not dlopen).
       - name: Create stub libdl for cross-compilation
         run: |
-          x86_64-w64-mingw32-gcc -c /dev/null -o /tmp/empty.o
+          x86_64-w64-mingw32-gcc -x c -c /dev/null -o /tmp/empty.o
           sudo x86_64-w64-mingw32-ar rcs /usr/x86_64-w64-mingw32/lib/libdl.a /tmp/empty.o
 
       - name: Compile Windows binaries
