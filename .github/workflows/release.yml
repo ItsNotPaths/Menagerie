@@ -251,6 +251,7 @@ jobs:
       - name: Compile Windows binaries
         run: |
           cp docker-build/nim-windows.cfg nim.cfg
+          echo "passC = \"-I$GITHUB_WORKSPACE/vendor/lua/src\"" >> nim.cfg
           nim c -d:release -o:menagerie.exe   src/menagerie.nim
           nim c -d:release -o:mod_manager.exe world-tools/mod_manager/mod_manager.nim
           nim c -d:release -o:world_tools.exe world-tools/tools/main.nim
