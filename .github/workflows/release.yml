@@ -1,0 +1,288 @@
+name: Build and Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version tag (e.g. v1.0.0)'
+        required: true
+        type: string
+      notes:
+        description: 'Release notes'
+        required: false
+        type: string
+        default: ''
+      prerelease:
+        description: 'Mark as pre-release'
+        required: false
+        type: boolean
+        default: false
+
+jobs:
+
+  # ── Linux ──────────────────────────────────────────────────────────────────
+  # Runs inside ubuntu:20.04 to pin glibc 2.31 — the same compatibility floor
+  # as the local Docker build. SDL2/ttf/image are built from source and cached.
+
+  build-linux:
+    runs-on: ubuntu-latest
+    container: ubuntu:20.04
+
+    steps:
+      # ubuntu:20.04 is minimal — install git + curl before checkout
+      - name: Install git and core tools
+        run: |
+          apt-get update -qq
+          apt-get install -y git curl ca-certificates
+
+      - uses: actions/checkout@v4
+
+      # All SDL2 backend headers and codec libs — mirrors docker-build/Dockerfile
+      - name: Install build dependencies
+        run: |
+          apt-get install -y \
+            build-essential cmake ninja-build pkg-config \
+            libx11-dev libxext-dev libxrandr-dev libxinerama-dev \
+            libxi-dev libxfixes-dev libxcursor-dev libxss-dev \
+            libwayland-dev libxkbcommon-dev \
+            libasound2-dev libpulse-dev \
+            libgl1-mesa-dev libegl1-mesa-dev \
+            libudev-dev \
+            libpng-dev libjpeg-turbo8-dev libwebp-dev \
+            zlib1g-dev \
+            libpcre3-dev
+
+      - name: Restore vendor cache
+        id: vendor-cache
+        uses: actions/cache@v4
+        with:
+          path: vendor
+          key: vendor-${{ hashFiles('download-deps.sh') }}
+
+      - name: Download vendor deps
+        if: steps.vendor-cache.outputs.cache-hit != 'true'
+        run: ./download-deps.sh
+
+      - name: Restore SDL2 build cache
+        id: sdl2-cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            /usr/local/lib/libSDL2*
+            /usr/local/lib/libfreetype*
+            /usr/local/lib/libharfbuzz*
+            /usr/local/lib/pkgconfig/sdl2*
+            /usr/local/include/SDL2
+          key: sdl2-ubuntu20-${{ hashFiles('download-deps.sh') }}
+
+      # Mirrors the cmake steps in docker-build/Dockerfile exactly
+      - name: Build SDL2 from source
+        if: steps.sdl2-cache.outputs.cache-hit != 'true'
+        run: |
+          SDL2_SRC="vendor/sdl2 tarball"
+          SDL2TTF_SRC="vendor/sdl2.ttf tarball"
+          SDL2IMG_SRC="vendor/sdl2.image tarball"
+
+          cmake -S "$SDL2_SRC" -B /tmp/sdl2-build \
+              -DCMAKE_BUILD_TYPE=Release \
+              -DSDL_STATIC=ON -DSDL_SHARED=OFF -DSDL_TEST=OFF \
+              -DCMAKE_INSTALL_PREFIX=/usr/local
+          cmake --build /tmp/sdl2-build --parallel
+          cmake --install /tmp/sdl2-build
+          rm -rf /tmp/sdl2-build
+
+          cmake -S "$SDL2TTF_SRC" -B /tmp/sdl2ttf-build \
+              -DCMAKE_BUILD_TYPE=Release \
+              -DBUILD_SHARED_LIBS=OFF \
+              -DSDL2TTF_VENDORED=ON \
+              -DSDL2TTF_HARFBUZZ=ON \
+              -DSDL2TTF_INSTALL=ON \
+              -DSDL2TTF_SAMPLES=OFF \
+              -DCMAKE_INSTALL_PREFIX=/usr/local
+          cmake --build /tmp/sdl2ttf-build --parallel
+          cmake --install /tmp/sdl2ttf-build
+          rm -rf /tmp/sdl2ttf-build
+
+          cmake -S "$SDL2IMG_SRC" -B /tmp/sdl2img-build \
+              -DCMAKE_BUILD_TYPE=Release \
+              -DBUILD_SHARED_LIBS=OFF \
+              -DSDL2IMAGE_SHARED=OFF \
+              -DSDL2IMAGE_TIF=OFF \
+              -DSDL2IMAGE_INSTALL=ON \
+              -DCMAKE_INSTALL_PREFIX=/usr/local
+          cmake --build /tmp/sdl2img-build --parallel
+          cmake --install /tmp/sdl2img-build
+          rm -rf /tmp/sdl2img-build
+
+      # choosenim requires glibc 2.33+ — install Nim directly from tarball instead
+      - name: Install Nim 2.2.4
+        run: |
+          curl -L "https://nim-lang.org/download/nim-2.2.4-linux_x64.tar.xz" \
+            | tar xJ -C /opt
+          ln -sf /opt/nim-2.2.4/bin/nim   /usr/local/bin/nim
+          ln -sf /opt/nim-2.2.4/bin/nimble /usr/local/bin/nimble
+
+      - name: Install Nim packages
+        run: nimble install sdl2 zippy -y
+
+      # cp replaces nim.cfg exactly as Docker does (mounts docker-build/nim.cfg as /src/nim.cfg)
+      - name: Compile binaries
+        run: |
+          cp docker-build/nim.cfg nim.cfg
+          nim c -d:release -o:menagerie     src/menagerie.nim
+          nim c -d:release -o:mod_manager   world-tools/mod_manager/mod_manager.nim
+          nim c -d:release -o:world_tools   world-tools/tools/main.nim
+          strip --strip-all menagerie mod_manager world_tools
+
+      - name: Verify SDL2 is statically linked
+        run: |
+          if ldd menagerie | grep -qi "libSDL2"; then
+            echo "ERROR: libSDL2 appears as a dynamic dependency"
+            ldd menagerie
+            exit 1
+          fi
+          echo "==> Dynamic deps (menagerie):"
+          ldd menagerie
+
+      - name: Package linux archive
+        run: |
+          mkdir -p dist/menagerie/world-tools/drivers
+          mkdir -p dist/menagerie/data
+          mkdir -p dist/menagerie/logs
+
+          cp menagerie mod_manager                   dist/menagerie/
+          cp world_tools                             dist/menagerie/world-tools/
+          cp -r world-tools/drivers/.                dist/menagerie/world-tools/drivers/
+          cp -r data/base-game                       dist/menagerie/data/
+          touch dist/menagerie/logs/game.log \
+                dist/menagerie/logs/manager.log \
+                dist/menagerie/logs/tools.log
+          cp README.md README-DEV.md README-USAGE.md settings.txt dist/menagerie/
+
+          cd dist
+          tar czf menagerie-linux-x64.tar.gz menagerie/
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: linux-zip
+          path: dist/menagerie-linux-x64.tar.gz
+
+  # ── Windows ────────────────────────────────────────────────────────────────
+  # Cross-compiles from ubuntu-latest using mingw-w64. SDL2/ttf/image come from
+  # official pre-built MinGW static libs (no need to compile from source).
+  # First run may need nim-windows.cfg tuning based on linker errors.
+
+  build-windows:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Restore vendor cache
+        id: vendor-cache
+        uses: actions/cache@v4
+        with:
+          path: vendor
+          key: vendor-${{ hashFiles('download-deps.sh') }}
+
+      - name: Download vendor deps
+        if: steps.vendor-cache.outputs.cache-hit != 'true'
+        run: ./download-deps.sh
+
+      - name: Install mingw-w64
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y mingw-w64
+
+      - name: Install Nim 2.2.4
+        run: |
+          curl -L "https://nim-lang.org/download/nim-2.2.4-linux_x64.tar.xz" \
+            | tar xJ -C /opt
+          echo "/opt/nim-2.2.4/bin" >> "$GITHUB_PATH"
+
+      - name: Install Nim packages
+        run: |
+          /opt/nim-2.2.4/bin/nimble install sdl2 zippy -y
+
+      - name: Restore SDL2 MinGW cache
+        id: sdl2-mingw-cache
+        uses: actions/cache@v4
+        with:
+          path: /opt/sdl2-mingw
+          key: sdl2-mingw-2.30.11-2.24.0-2.8.8
+
+      - name: Download SDL2 MinGW static libs
+        if: steps.sdl2-mingw-cache.outputs.cache-hit != 'true'
+        run: |
+          mkdir -p /opt/sdl2-mingw
+
+          curl -fsSL "https://github.com/libsdl-org/SDL/releases/download/release-2.30.11/SDL2-devel-2.30.11-mingw.tar.gz" \
+            | tar xz --strip-components=1 -C /opt/sdl2-mingw
+
+          curl -fsSL "https://github.com/libsdl-org/SDL_ttf/releases/download/release-2.24.0/SDL2_ttf-devel-2.24.0-mingw.tar.gz" \
+            | tar xz --strip-components=1 -C /opt/sdl2-mingw
+
+          curl -fsSL "https://github.com/libsdl-org/SDL_image/releases/download/release-2.8.8/SDL2_image-devel-2.8.8-mingw.tar.gz" \
+            | tar xz --strip-components=1 -C /opt/sdl2-mingw
+
+      - name: Compile Windows binaries
+        run: |
+          cp docker-build/nim-windows.cfg nim.cfg
+          nim c -d:release -o:menagerie.exe   src/menagerie.nim
+          nim c -d:release -o:mod_manager.exe world-tools/mod_manager/mod_manager.nim
+          nim c -d:release -o:world_tools.exe world-tools/tools/main.nim
+          x86_64-w64-mingw32-strip --strip-all menagerie.exe mod_manager.exe world_tools.exe
+
+      - name: Package windows archive
+        run: |
+          mkdir -p dist/menagerie/world-tools/drivers
+          mkdir -p dist/menagerie/data
+          mkdir -p dist/menagerie/logs
+
+          cp menagerie.exe mod_manager.exe            dist/menagerie/
+          cp world_tools.exe                          dist/menagerie/world-tools/
+          cp -r world-tools/drivers/.                 dist/menagerie/world-tools/drivers/
+          cp -r data/base-game                        dist/menagerie/data/
+          touch dist/menagerie/logs/game.log \
+                dist/menagerie/logs/manager.log \
+                dist/menagerie/logs/tools.log
+          cp README.md README-DEV.md README-USAGE.md settings.txt dist/menagerie/
+
+          cd dist
+          zip -r menagerie-windows-x64.zip menagerie/
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-zip
+          path: dist/menagerie-windows-x64.zip
+
+  # ── GitHub Release ─────────────────────────────────────────────────────────
+
+  release:
+    needs: [build-linux, build-windows]
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: linux-zip
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: windows-zip
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          PRERELEASE_FLAG=""
+          if [ "${{ inputs.prerelease }}" = "true" ]; then
+            PRERELEASE_FLAG="--prerelease"
+          fi
+          gh release create "${{ inputs.version }}" \
+            menagerie-linux-x64.tar.gz \
+            menagerie-windows-x64.zip \
+            --title "Menagerie ${{ inputs.version }}" \
+            --notes "${{ inputs.notes }}" \
+            $PRERELEASE_FLAG
