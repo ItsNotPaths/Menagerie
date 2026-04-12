@@ -5,7 +5,7 @@
 
 import std/[json, os, strutils, tables]
 import plugin_db
-import ../../vendor/lua/lua_bindings
+import ../../src/engine/lua_bindings
 
 proc luaPopError(L: LuaStatePtr): string =
   result = luaToString(L, -1)

@@ -4,7 +4,7 @@
 import strutils, os
 import std/[json, tables]
 import state, api_types, content, log
-import ../../vendor/lua/lua_bindings
+import lua_bindings
 
 proc luaPopError*(L: LuaStatePtr): string =
   ## Read the error string on top of the stack and pop it.
