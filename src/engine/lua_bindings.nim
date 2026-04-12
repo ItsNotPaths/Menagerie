@@ -11,13 +11,19 @@
 
 import std/os
 
+# Include path for the Lua headers. currentSourcePath gives the right answer
+# for native (Linux) builds. For the Windows cross-compile, Nim rewrites this
+# to backslashes that gcc-on-Linux can't parse, so the workflow appends a
+# second forward-slash -I to nim.cfg before invoking the compiler.
 const luaSrcDir* =
   currentSourcePath.parentDir.parentDir.parentDir / "vendor" / "lua" / "src"
-
-# Compile the full Lua runtime into the binary.
-# MAKE_LIB suppresses the lua/luac standalone main() symbols.
 {.passC: "-DMAKE_LIB -I\"" & luaSrcDir & "\"".}
-{.compile: luaSrcDir / "onelua.c".}
+
+# {.compile.} must be a literal relative string: Nim resolves it relative to
+# this source file without going through currentSourcePath, so the path stays
+# as forward slashes and works for both native and cross-compile builds.
+# MAKE_LIB suppresses the lua/luac standalone main() symbols.
+{.compile: "../../vendor/lua/src/onelua.c".}
 
 # ── Types ─────────────────────────────────────────────────────────────────────
 
