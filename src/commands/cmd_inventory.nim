@@ -11,16 +11,20 @@ import engine/modifiers
 import commands/core
 import engine/api
 
-const invCategories  = ["weapon", "armor", "consumable", "container",
+const invCategories  = ["weapon", "ammunition", "armor", "consumable", "container",
                         "material", "quest", "currency", "key"]
-const armorSlotOrder = ["head", "chest", "hands", "legs", "feet", "back", "neck", "ring"]
+const armorSlotOrder = ["helm", "cuirass", "left_pauldron", "right_pauldron",
+                        "left_gauntlet", "right_gauntlet", "greaves", "boots"]
 
 
-proc equippedLines(p: PlayerState): seq[string] =
+proc equippedLines(state: GameState; p: PlayerState): seq[string] =
   if p.mainhand != "":
     result.add &"  Mainhand : {anyItem(p.mainhand).displayName}"
   if p.offhand != "":
     result.add &"  Offhand  : {anyItem(p.offhand).displayName}"
+  if p.ammo != "":
+    let count = countItem(state, p.ammo)
+    result.add &"  Ammo     : {anyItem(p.ammo).displayName}  ×{count}"
   for slot in armorSlotOrder:
     let aid = p.armor.getOrDefault(slot, "")
     if aid != "":
@@ -66,6 +70,14 @@ proc itemDetailLines(state: GameState; itemId: string): seq[string] =
       result.add &"  [[Equip:equip container {itemId}]]"
     if equippedCount > 0:
       result.add &"  [[Unequip:unequip container {itemId}]]"
+  elif info.itemType == "ammunition":
+    let isEquipped = p.ammo == itemId
+    if isEquipped:
+      result.add "  Equipped: Ammo"
+      result.add ""
+      result.add &"  [[Unequip:unequip ammo]]"
+    else:
+      result.add &"  [[Equip Ammo:equip ammo {itemId}]]"
   elif info.itemType == "armor":
     let zone   = info.zone
     let inSlot = zone != "" and p.armor.getOrDefault(zone, "") == itemId
@@ -129,6 +141,7 @@ proc cmdInventory(state: var GameState; args: seq[string]): CmdResult =
     var labelQueues = initTable[string, seq[string]]()
     if p.mainhand != "": labelQueues.mgetOrPut(p.mainhand, @[]).add "[MH]"
     if p.offhand  != "": labelQueues.mgetOrPut(p.offhand,  @[]).add "[OH]"
+    if p.ammo     != "": labelQueues.mgetOrPut(p.ammo,     @[]).add "[Ammo]"
     for aslot, aid in p.armor:
       labelQueues.mgetOrPut(aid, @[]).add &"[{aslot.capitalizeAscii}]"
 
@@ -165,7 +178,7 @@ proc cmdInventory(state: var GameState; args: seq[string]): CmdResult =
   for c in invCategories:
     lines.add &"  [[{c.capitalizeAscii}:inventory {c}]]"
 
-  let eqLines = equippedLines(p)
+  let eqLines = equippedLines(state, p)
   if eqLines.len > 0:
     lines.add ""
     for l in eqLines: lines.add l
@@ -205,13 +218,26 @@ proc cmdEquip(state: var GameState; args: seq[string]): CmdResult =
       lines:      @[&"Equipped {name}. (+{extra} slots | stamina {newUsed}/{newCap})"],
       panelLines: fresh, panelAppend: true)
 
+  elif slot == "ammo":
+    if info.itemType != "ammunition":
+      return err(&"{name} is not ammunition.")
+    p[].ammo = itemId
+
   elif slot in ["mainhand", "offhand"]:
     if not info.canEquip:
       return err(&"{name} cannot be equipped.")
     if countAvailable(state, itemId) < 1:
       return err(&"No unequipped copy of {name} available.")
-    if slot == "mainhand": p[].mainhand = itemId
-    else:                  p[].offhand  = itemId
+    if slot == "mainhand":
+      if info.handType == "two_handed" and p[].offhand != "":
+        p[].offhand = ""
+      p[].mainhand = itemId
+    else:
+      if info.handType == "two_handed":
+        return err(&"{name} is two-handed — equip it in the mainhand.")
+      if p[].mainhand != "" and anyItem(p[].mainhand).handType == "two_handed":
+        return err(&"Can't equip {name} in offhand while wielding a two-handed weapon.")
+      p[].offhand = itemId
 
   elif slot in armorSlotOrder:
     if info.itemType != "armor":
@@ -281,6 +307,16 @@ proc cmdUnequip(state: var GameState; args: seq[string]): CmdResult =
     p[].offhand = ""
     let fresh = itemDetailLines(state, itemId)
     return CmdResult(lines: @[&"Unequipped {name} from offhand."],
+                     panelLines: fresh, panelAppend: true)
+
+  if slot == "ammo":
+    if p[].ammo == "":
+      return err("No ammunition equipped.")
+    let itemId = p[].ammo
+    let name   = anyItem(itemId).displayName
+    p[].ammo = ""
+    let fresh = itemDetailLines(state, itemId)
+    return CmdResult(lines: @[&"Unequipped {name} from ammo."],
                      panelLines: fresh, panelAppend: true)
 
   if slot in armorSlotOrder:

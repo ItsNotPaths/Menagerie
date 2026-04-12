@@ -18,6 +18,7 @@ import gameplay_vars
 type
   ItemInfo* = object
     id*, displayName*, itemType*, zone*: string
+    handType*:                           string
     slotCost*, damage*, staminaCost*:    int
     defense*, extraSlots*, staminaReq*:  int
     canEquip*:                           bool
@@ -33,6 +34,7 @@ proc anyItem*(id: string): ItemInfo =
       id:          id,
       displayName: d.displayName,
       itemType:    d.itemType,
+      handType:    d.handType,
       slotCost:    d.slotCost,
       damage:      d.damage,
       staminaCost: d.staminaCost,
@@ -59,7 +61,8 @@ proc anyItem*(id: string): ItemInfo =
 proc giveItem*(state: var GameState; itemId: string) =
   ## Add one copy of itemId to inventory.
   let info = anyItem(itemId)
-  if not info.canEquip:
+  let stackable = (not info.canEquip) or info.itemType == "ammunition"
+  if stackable:
     for i in 0 ..< state.player.inventory.len:
       if state.player.inventory[i].id == itemId:
         inc state.player.inventory[i].count
@@ -74,7 +77,7 @@ proc giveItem*(state: var GameState; itemId: string) =
 proc takeItem*(state: var GameState; itemId: string): bool =
   ## Remove one copy of itemId. Returns false if not found.
   let info = anyItem(itemId)
-  if info.canEquip:
+  if info.canEquip and info.itemType != "ammunition":
     var equipped: seq[string] = @[state.player.mainhand, state.player.offhand]
     for v in state.player.armor.values(): equipped.add v
     for c in state.player.containers:    equipped.add c

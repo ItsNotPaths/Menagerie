@@ -37,6 +37,7 @@ type
     inventory*:        seq[InventoryEntry]
     mainhand*:         string    ## item id in main hand ("" = empty)
     offhand*:          string    ## item id in off hand  ("" = empty)
+    ammo*:             string    ## equipped ammunition item id ("" = empty)
     armor*:            Table[string, string]   ## zone → plate id
     containers*:       seq[string]             ## equipped container item ids
     favourites*:       seq[string]             ## quick-access spell list
@@ -166,6 +167,7 @@ proc initPlayerState*(): PlayerState =
   result.fatigue           = 100.0
   result.mainhand          = ""
   result.offhand           = ""
+  result.ammo              = ""
   result.level             = 1
   result.xp                = 0.0
   result.maxHealth         = 100.0

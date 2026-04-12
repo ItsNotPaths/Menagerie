@@ -30,8 +30,8 @@
 ##   beam  — all enemies on a row              damage × 0.6
 ##   wave  — all enemies within 1 row of tgt  damage × 0.35
 
-import std/[json, options, random, sequtils, strformat, strutils, tables]
-import state, content, gameplay_vars, saves, log
+import std/[algorithm, json, options, random, sequtils, strformat, strutils, tables]
+import state, content, gameplay_vars, saves
 import api
 import clock
 import conditions as cond
@@ -175,20 +175,74 @@ proc shieldReduction(player: PlayerState): float =
       result += info.defense.float   ## shield_strength maps to defense in ItemInfo
 
 
-const weaponSkills = ["longblade", "shortblade", "longblunt", "shortblunt", "archery"]
+proc applyResistances(enemy: CombatEnemy; damage: float; damageType: string): float  # forward decl
+
+proc spellLabel(spDef: SpellDef): string =
+  if spDef.displayName != "": spDef.displayName else: spDef.id
+
+proc announceWeaponSpells(weaponId: string; hits: seq[CombatEnemy]): seq[string] =
+  ## Narration only — describes which spells the weapon is about to trigger.
+  ## Wielder spells flow into the attacker; recipient spells flow into the
+  ## hit enemies. Called *before* damage so the announcement reads naturally.
+  if weaponId == "" or weaponId notin content.items: return
+  let def = content.items[weaponId]
+  for spellId in def.wielderSpells:
+    let spDef = content.getSpell(spellId)
+    if spDef.id == "": continue
+    result.add &"  Your attack channels {spellLabel(spDef)} into you."
+  if hits.len == 0: return
+  let names = hits.mapIt(it.label).join(", ")
+  for spellId in def.recipientSpells:
+    let spDef = content.getSpell(spellId)
+    if spDef.id == "": continue
+    result.add &"  Your attack inflicts {spellLabel(spDef)} upon {names}."
+
+proc applyWeaponSpells(state: var GameState; weaponId: string;
+                       hits: seq[CombatEnemy]): seq[string] =
+  ## Apply wielder_spells to the player and recipient_spells to each hit enemy.
+  ## Runs status effects, on_hit_commands, and the spell's authored damage
+  ## (spells like "death" carry raw damage instead of an effects array).
+  if weaponId == "" or weaponId notin content.items: return
+  let def = content.items[weaponId]
+
+  for spellId in def.wielderSpells:
+    let spDef = content.getSpell(spellId)
+    if spDef.id == "": continue
+    result &= sp.applySpellEffects(state, spDef, @["player"])
+    for cmdStr in spDef.onHitCommands:
+      result &= api.runCommand(state, cmdStr, "player")
+    if spDef.damage != 0.0:
+      result &= api.cmdDamage(state, "player", "player", spDef.damage, "health")
+
+  if hits.len == 0: return
+  let hitIds = hits.mapIt(it.id)
+  for spellId in def.recipientSpells:
+    let spDef = content.getSpell(spellId)
+    if spDef.id == "": continue
+    result &= sp.applySpellEffects(state, spDef, hitIds)
+    for cmdStr in spDef.onHitCommands:
+      for eid in hitIds:
+        result &= api.runCommand(state, cmdStr, eid)
+    if spDef.damage != 0.0:
+      for e in hits:
+        let dmg = applyResistances(e, spDef.damage, spellId)
+        result &= api.cmdDamage(state, "enemy." & e.id, e.id, dmg, "health")
+
 
 proc resolvedWeaponSkill(itemId: string): string =
-  ## Return the weapon_skill for itemId, logging a warning if missing/unknown.
-  ## Callers should skip items where this is not meaningful (shields, armor).
+  ## Derive the skill from damage_type + hand_type:
+  ##   bow                     -> archery (regardless of hand_type)
+  ##   one_handed + blade      -> shortblade
+  ##   two_handed + blade      -> longblade
+  ##   one_handed + blunt      -> shortblunt
+  ##   two_handed + blunt      -> longblunt
   if itemId notin content.items: return "longblade"
   let def = content.items[itemId]
-  if def.weaponSkill == "":
-    log.log(log.Game, log.Warn, &"Weapon '{itemId}' has no weapon_skill defined")
-    return "longblade"
-  if def.weaponSkill notin weaponSkills:
-    log.log(log.Game, log.Warn, &"Weapon '{itemId}' has unrecognised weapon_skill '{def.weaponSkill}'")
-    return "longblade"
-  def.weaponSkill
+  if def.damageType == "bow": return "archery"
+  let twoHanded = def.handType == "two_handed"
+  case def.damageType
+  of "blunt": (if twoHanded: "longblunt" else: "shortblunt")
+  else:       (if twoHanded: "longblade" else: "shortblade")
 
 
 proc applyResistances(enemy: CombatEnemy; damage: float; damageType: string): float =
@@ -546,28 +600,47 @@ proc findAtIdx(cs: CombatState; row, dist: int): int =
 proc resolveRound(state: var GameState): seq[string]  # forward decl
 
 
-proc doAttack*(state: var GameState): seq[string] =
+proc doAttack*(state: var GameState; bowRows: seq[int] = @[]): seq[string] =
+  ## Unified attack: each equipped weapon contributes one strike. Bows
+  ## (damage_type = "bow") need ammo and a row in `bowRows` (in mainhand→offhand
+  ## order). Non-bow weapons swing at melee range. Each bow consumes one arrow.
   if not state.combat.isSome: return @["No active combat."]
 
-  # Build one damage entry per equipped weapon hand (mainhand then offhand).
-  # Each weapon uses its own weapon_skill so mixed loadouts work correctly.
-  var damages: seq[float]
+  var strikes   = newJArray()
   var totalCost = 0.0
+  var bowIdx    = 0
+
   for itemId in [state.player.mainhand, state.player.offhand]:
     if itemId == "": continue
     if itemId notin content.items: continue
     let def = content.items[itemId]
     if def.itemType.toLowerAscii in ["shield", "armor"]: continue
     if def.damage == 0: continue
-    let ws  = resolvedWeaponSkill(itemId)
-    var dmg = def.damage.float * (1.0 + sk.skillPct(state, ws) * 0.5)
-    dmg *= mods.modifierGet(state, &"{ws}_damage_pct") * mods.modifierGet(state, "melee_damage_pct")
-    damages.add dmg
+    let ws = resolvedWeaponSkill(itemId)
+
+    if def.damageType == "bow":
+      let ammoId = state.player.ammo
+      if ammoId == "" or ammoId notin content.items: continue
+      let ammo = content.items[ammoId]
+      let baseDmg = def.damage.float + ammo.damage.float
+      var dmg = baseDmg * (1.0 + sk.skillPct(state, "archery") * 0.25)
+      dmg *= mods.modifierGet(state, "archery_damage_pct")
+      let row = if bowIdx < bowRows.len: bowRows[bowIdx] else: 0
+      strikes.add %*{"weapon": itemId, "damage": dmg, "ranged": true,
+                     "row": row, "ammo": ammoId, "ammo_label": ammo.displayName}
+      discard takeItem(state, ammoId)
+      if not hasItem(state, ammoId): state.player.ammo = ""
+      inc bowIdx
+    else:
+      var dmg = def.damage.float * (1.0 + sk.skillPct(state, ws) * 0.5)
+      dmg *= mods.modifierGet(state, &"{ws}_damage_pct") * mods.modifierGet(state, "melee_damage_pct")
+      strikes.add %*{"weapon": itemId, "damage": dmg, "ranged": false}
+
     totalCost += def.staminaCost.float
 
   # Unarmed fallback
-  if damages.len == 0:
-    damages.add gvFloat("base_player_damage", 12.0)
+  if strikes.len == 0:
+    strikes.add %*{"weapon": "", "damage": gvFloat("base_player_damage", 12.0), "ranged": false}
     totalCost = gvFloat("attack_stamina_cost", 15.0)
 
   if state.player.stamina < totalCost:
@@ -576,7 +649,7 @@ proc doAttack*(state: var GameState): seq[string] =
   state.player.stamina -= totalCost
   let cs = state.combat.get
   cs.playerLastAction = "attack"
-  cs.pendingAction    = %*{"type": "attack", "damages": damages}
+  cs.pendingAction    = %*{"type": "attack", "strikes": strikes}
   result.add "You ready your weapon."
   result &= resolveRound(state)
 
@@ -778,28 +851,65 @@ proc firePendingAction(state: var GameState): seq[string] =
     let cs2 = state.combat.get
     let reachMult = mods.modifierGet(state, "melee_range")
     let atRange = cs2.enemies.filterIt(it.distance.float <= it.meleeRange.float * reachMult)
-    if atRange.len == 0:
-      result.add "  Your swing finds no one in range."
-    else:
-      # Support multi-damage (dual-wield) and legacy single-damage pendingActions
-      let damagesNode = pa{"damages"}
-      let rawDamages = if damagesNode != nil and damagesNode.kind == JArray and damagesNode.len > 0:
-                         damagesNode.mapIt(it.getFloat(0.0))
-                       else:
-                         @[pa{"damage"}.getFloat(gvFloat("base_player_damage", 12.0))]
-      var totalDealt = 0.0
-      for rawDmg in rawDamages:
+    let pen = max(1, state.variables.getOrDefault("arrow_penetration", %1).getInt(1))
+
+    let strikesNode = pa{"strikes"}
+    if strikesNode == nil or strikesNode.kind != JArray or strikesNode.len == 0: return
+
+    var totalDealt      = 0.0
+    var lastTargetId    = ""
+    var lastTargetCount = 0
+
+    for s in strikesNode:
+      let weaponId = s{"weapon"}.getStr("")
+      let rawDmg   = s{"damage"}.getFloat(0.0)
+      let ranged   = s{"ranged"}.getBool(false)
+
+      if ranged:
+        let row    = s{"row"}.getInt(0)
+        let ammoId = s{"ammo"}.getStr("")
+        let label  = s{"ammo_label"}.getStr("arrow")
+        var inRow = cs2.enemies.filterIt(it.row == row)
+        if inRow.len == 0:
+          result.add &"  Your {label} sails through row {row} — no targets."
+          continue
+        inRow.sort(proc(a, b: CombatEnemy): int = cmp(a.distance, b.distance))
+        let hits = inRow[0 ..< min(pen, inRow.len)]
+        let pierceNote = if pen > 1 and hits.len > 1: &" (pierces {hits.len})" else: ""
+        result.add &"  Your {label} strikes {hits.mapIt(it.label).join(\", \")}{pierceNote}."
+        result &= announceWeaponSpells(weaponId, hits)
+        if ammoId != "":
+          result &= announceWeaponSpells(ammoId, hits)
+        for e in hits:
+          let dmg = applyResistances(e, rawDmg, "physical")
+          result &= api.cmdDamage(state, "enemy." & e.id, e.id, dmg, "health")
+          totalDealt += dmg
+        result &= mods.fireEvent(state, "hit_landed", "player")
+        result &= applyWeaponSpells(state, weaponId, hits)
+        if ammoId != "":
+          result &= applyWeaponSpells(state, ammoId, hits)
+        lastTargetId    = hits[0].id
+        lastTargetCount = hits.len
+      else:
+        if atRange.len == 0:
+          result.add "  Your swing finds no one in range."
+          continue
         result.add &"  You strike {atRange.mapIt(it.label).join(\", \")}."
+        result &= announceWeaponSpells(weaponId, atRange)
         for e in atRange:
           let dmg = applyResistances(e, rawDmg, "physical")
           result &= api.cmdDamage(state, "enemy." & e.id, e.id, dmg, "health")
           totalDealt += dmg
         result &= mods.fireEvent(state, "hit_landed", "player")
-      state.variables["_last_hit_damage_dealt"]    = %totalDealt
-      state.variables["_last_hit_target_id"]       = %(if atRange.len > 0: atRange[0].id else: "")
-      state.variables["_last_hit_target_count"]    = %atRange.len
-      let prevDealt = state.variables.getOrDefault("_damage_dealt_this_combat", %0.0).getFloat(0.0)
-      state.variables["_damage_dealt_this_combat"] = %(prevDealt + totalDealt)
+        result &= applyWeaponSpells(state, weaponId, atRange)
+        lastTargetId    = atRange[0].id
+        lastTargetCount = atRange.len
+
+    state.variables["_last_hit_damage_dealt"]    = %totalDealt
+    state.variables["_last_hit_target_id"]       = %lastTargetId
+    state.variables["_last_hit_target_count"]    = %lastTargetCount
+    let prevDealt = state.variables.getOrDefault("_damage_dealt_this_combat", %0.0).getFloat(0.0)
+    state.variables["_damage_dealt_this_combat"] = %(prevDealt + totalDealt)
 
   of "cast":
     let mode    = pa{"mode"}.getStr

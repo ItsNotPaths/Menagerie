@@ -17,8 +17,11 @@ type
     slotCost*, value*, damage*, staminaCost*:   int
     extraSlots*, staminaReq*:                   int   ## container fields
     canEquip*:                                  bool
-    weaponSkill*:                               string   ## e.g. "longblade", "shortblade"
+    handType*:                                  string   ## "one_handed" | "two_handed"
+    damageType*:                                string   ## "blade" | "blunt"
     effects*:                                   seq[string]   ## command strings
+    wielderSpells*:                             seq[string]   ## spell ids cast on wielder when this weapon hits
+    recipientSpells*:                           seq[string]   ## spell ids cast on each enemy this weapon hits
     stationTags*:                               seq[string]   ## crafting station ids
     recipe*:                                    seq[string]   ## "<item-id>x<count>" entries
 
@@ -193,8 +196,11 @@ proc loadItems(dir: string) =
       extraSlots:  d{"extra_slots"}.getInt(0),
       staminaReq:  d{"stamina_req"}.getInt(0),
       canEquip:    d{"can_equip"}.getBool(false),
-      weaponSkill: d{"weapon_skill"}.getStr(""),
+      handType:    d{"hand_type"}.getStr("one_handed"),
+      damageType:  d{"damage_type"}.getStr("blade"),
       effects:     strSeq(d{"effects"}),
+      wielderSpells:   strSeq(d{"wielder_spells"}),
+      recipientSpells: strSeq(d{"recipient_spells"}),
       stationTags: strSeq(d{"station_tags"}),
       recipe:      strSeq(d{"recipe"}),
     )

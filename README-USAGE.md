@@ -445,7 +445,7 @@ end
 |---|---|
 | `id` | Must match filename |
 | `name` / `display_name` | Internal / shown name |
-| `zone` | Slot: `"head"` \| `"chest"` \| `"torso"` \| `"arms"` \| `"legs"` |
+| `zone` | Slot: `"helm"` \| `"cuirass"` \| `"greaves"` \| `"boots"` \| `"left_pauldron"` \| `"right_pauldron"` \| `"left_gauntlet"` \| `"right_gauntlet"` |
 | `material` | Determines base tier |
 | `defense` | Flat defense value |
 | `value` | Trade value |
@@ -459,9 +459,9 @@ Define `on_<event>` fields directly on the plate JSON — same format as perks, 
 
 ```json
 {
-  "id": "iron_chest",
-  "display_name": "Iron Chestplate",
-  "zone": "chest",
+  "id": "iron_cuirass",
+  "display_name": "Iron Cuirass",
+  "zone": "cuirass",
   "defense": 5,
   "value": 20,
   "on_hit_received": ["add_effect player regen 3"],

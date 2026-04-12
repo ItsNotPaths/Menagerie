@@ -89,6 +89,7 @@ proc playerToJson(p: PlayerState): JsonNode =
   result["fatigue"]           = %p.fatigue
   result["mainhand"]          = %p.mainhand
   result["offhand"]           = %p.offhand
+  result["ammo"]              = %p.ammo
   result["level"]             = %p.level
   result["xp"]                = %p.xp
   result["maxHealth"]         = %p.maxHealth
@@ -157,6 +158,8 @@ proc playerFromJson(j: JsonNode): PlayerState =
     result.mainhand = j["mainhand"].getStr
   if "offhand" in j:
     result.offhand = j["offhand"].getStr
+  if "ammo" in j:
+    result.ammo = j["ammo"].getStr
   if "level" in j:
     result.level = j["level"].getInt
   if "xp" in j:

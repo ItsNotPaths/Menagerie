@@ -7,6 +7,7 @@
 import std/[options, strformat, strutils]
 import engine/state
 import engine/content
+import engine/items
 import engine/world
 import engine/combat
 import commands/core
@@ -34,6 +35,33 @@ proc cmdLookCombat(state: var GameState; args: seq[string]): CmdResult =
 
 
 proc cmdAttackCombat(state: var GameState; args: seq[string]): CmdResult =
+  let p = state.player
+  proc isBow(itemId: string): bool =
+    itemId != "" and content.getItem(itemId).damageType == "bow"
+
+  var bowCount = 0
+  if isBow(p.mainhand): inc bowCount
+  if isBow(p.offhand):  inc bowCount
+
+  if bowCount > 0:
+    if p.ammo == "":
+      return err("No ammunition equipped — equip arrows before firing.")
+    if countItem(state, p.ammo) < bowCount:
+      return err(&"Not enough arrows for {bowCount} bows ({countItem(state, p.ammo)} in stock).")
+    if args.len < bowCount:
+      let prompt =
+        if bowCount == 1: "Fire — which row? (e.g. 'attack 3')"
+        else:             &"Fire {bowCount} arrows — which rows? (e.g. 'attack 3 5')"
+      return CmdResult(
+        lines:   @[prompt],
+        prefill: "attack " & args.join(" ") & (if args.len > 0: " " else: ""),
+      )
+    var rows: seq[int]
+    for i in 0 ..< bowCount:
+      try: rows.add parseInt(args[i])
+      except: return err(&"Row {i+1} must be an integer.")
+    return ok(doAttack(state, rows))
+
   ok(doAttack(state))
 
 
