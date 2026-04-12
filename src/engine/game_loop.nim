@@ -72,7 +72,9 @@ proc pushStats(state: GameState) =
 
 proc pushResult(res: CmdResult; state: GameState) =
   pushLines(res.lines)
-  if res.imagePath != "":
+  if res.imageData.len > 0:
+    toUi.send(UiMsg(kind: umLoadLocation, imgData: res.imageData))
+  elif res.imagePath != "":
     toUi.send(UiMsg(kind: umLoadLocation, imgPath: res.imagePath))
   if res.panelLines.len > 0:
     if res.panelAppend:

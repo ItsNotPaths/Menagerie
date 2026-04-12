@@ -18,8 +18,6 @@ let goDirs = {
   "west":  (-1, 0), "w": (-1, 0),
 }.toTable
 
-let surveyLongDir = {"n": "north", "s": "south", "e": "east", "w": "west"}.toTable
-
 
 proc cmdLook(state: var GameState; args: seq[string]): CmdResult =
   result = ok(currentLines(state))
@@ -51,20 +49,14 @@ proc cmdGo(state: var GameState; args: seq[string]): CmdResult =
 
 # ── Survey image composite ───────────────────────────────────────────────────
 
-const surveyDirs = {
-  "north": (0,  1), "n": (0,  1),
-  "south": (0, -1), "s": (0, -1),
-  "east":  (1,  0), "e": (1,  0),
-  "west":  (-1, 0), "w": (-1, 0),
-}.toTable
-
 const surveyOutW = 3440
 const surveyOutH = 1440
 
-proc surveyComposite(state: GameState; dir: string): string =
-  ## Composite a horizon image for survey direction. Returns temp PNG path or "".
-  if dir notin surveyDirs: return ""
-  let (dx, dy) = surveyDirs[dir]
+proc surveyComposite(state: GameState; dir: string): seq[byte] =
+  ## Composite a horizon image for survey direction.
+  ## Returns PNG bytes in memory (no file persists on disk), or @[] on failure.
+  if dir notin goDirs: return @[]
+  let (dx, dy) = goDirs[dir]
   let (px, py) = state.player.position
   let range    = surveyRange(state)
 
@@ -72,14 +64,14 @@ proc surveyComposite(state: GameState; dir: string): string =
   var paths: seq[string]
   for i in 1..range:
     paths.add tileImagePath(state, px + dx * i, py + dy * i)
-  if paths.allIt(it == ""): return ""
+  if paths.allIt(it == ""): return @[]
 
   # Equal-height strips — each tile gets the same slice height
   let sh = surveyOutH div range
 
   # Output surface in RGB24 — no alpha channel, avoids all blend mode complications
   let outSurf = createRGBSurface(surveyOutW.int32, surveyOutH.int32, 24)
-  if outSurf.isNil: return ""
+  if outSurf.isNil: return @[]
   defer: freeSurface(outSurf)
   discard fillRect(outSurf, nil, mapRGB(outSurf.format, 17, 17, 17))
 
@@ -112,9 +104,17 @@ proc surveyComposite(state: GameState; dir: string): string =
     var dstR = rect(dstLeft.cint, yCursor.cint, cropW.cint, cropH.cint)
     discard blitSurface(panel, srcR.addr, outSurf, dstR.addr)
 
+  # Write PNG to a temp file, read it into memory, then delete the file immediately
+  # so no persistent artifact is left on disk.
   let tmpPath = getTempDir() / "menagerie_survey.png"
-  if sdl2img.savePNG(outSurf, tmpPath.cstring) != 0: return ""
-  tmpPath
+  if sdl2img.savePNG(outSurf, tmpPath.cstring) != 0: return @[]
+  try:
+    let raw = readFile(tmpPath)
+    result = newSeq[byte](raw.len)
+    if raw.len > 0:
+      copyMem(addr result[0], unsafeAddr raw[0], raw.len)
+  finally:
+    try: removeFile(tmpPath) except: discard
 
 
 proc cmdSurvey(state: var GameState; args: seq[string]): CmdResult =
@@ -122,7 +122,7 @@ proc cmdSurvey(state: var GameState; args: seq[string]): CmdResult =
     return err("Survey which direction? (north / south / east / west)")
   let dir = args[0].toLowerAscii
   result = okTicks(2, surveyLines(state, dir))
-  result.imagePath = surveyComposite(state, dir)
+  result.imageData = surveyComposite(state, dir)
 
 
 proc cmdPeekWorld(state: var GameState; args: seq[string]): CmdResult =
@@ -137,7 +137,7 @@ proc cmdEnter(state: var GameState; args: seq[string]): CmdResult =
 proc cmdTravel(state: var GameState; args: seq[string]): CmdResult =
   if args.len == 0:
     let (x, y) = state.player.position
-    let roadTypes = ["road", "crossroads", "town", "dungeon"]
+    let roadTypes = ["road", "crossroads", "town", "dungeon", "ruin"]
     let dirList = [("North", 0, 1), ("South", 0, -1), ("East", 1, 0), ("West", -1, 0)]
     var links: seq[string]
     for (label, ddx, ddy) in dirList:

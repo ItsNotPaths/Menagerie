@@ -96,7 +96,7 @@ proc cmdDamage*(state: var GameState; sel, selfId: string;
       result &= cmdDamage(state, "enemy." & selfId, selfId, amount, s)
   of "enemy.all":
     if state.combat.isSome:
-      var cs = state.combat.get
+      let cs = state.combat.get
       for i in 0 ..< cs.enemies.len:
         let label = cs.enemies[i].label
         case s
@@ -105,14 +105,13 @@ proc cmdDamage*(state: var GameState; sel, selfId: string;
         of "focus":   cs.enemies[i].focus   = max(0.0, cs.enemies[i].focus   - amount)
         else: discard
         result.add &"  {label} takes {int(amount)} {s} damage."
-      state.combat = some(cs)
   else:
     if sel.startsWith("enemy."):
       let rawId = sel[6..^1]
       let eid   = if rawId == "self": selfId else: rawId
       let idx   = resolveEnemyIdx(state, eid)
       if idx >= 0 and state.combat.isSome:
-        var cs = state.combat.get
+        let cs = state.combat.get
         let label = cs.enemies[idx].label
         case s
         of "health":  cs.enemies[idx].health  = max(0.0, cs.enemies[idx].health  - amount)
@@ -120,7 +119,6 @@ proc cmdDamage*(state: var GameState; sel, selfId: string;
         of "focus":   cs.enemies[idx].focus   = max(0.0, cs.enemies[idx].focus   - amount)
         else: discard
         result.add &"  {label} takes {int(amount)} {s} damage."
-        state.combat = some(cs)
 
 
 # ── Verb: set_stat ────────────────────────────────────────────────────────────
@@ -156,26 +154,24 @@ proc cmdSetStat(state: var GameState; sel, selfId, stat, valueStr: string): seq[
       discard cmdSetStat(state, "enemy." & selfId, selfId, s, valueStr)
   elif sel == "enemy.all":
     if state.combat.isSome:
-      var cs = state.combat.get
+      let cs = state.combat.get
       for i in 0 ..< cs.enemies.len:
         case s
         of "health":  cs.enemies[i].health  = max(0.0, min(cs.enemies[i].maxHealth,  if relative: cs.enemies[i].health  + amt else: amt))
         of "stamina": cs.enemies[i].stamina = max(0.0, min(cs.enemies[i].staminaMax, if relative: cs.enemies[i].stamina + amt else: amt))
         of "focus":   cs.enemies[i].focus   = max(0.0, min(cs.enemies[i].focusMax,   if relative: cs.enemies[i].focus   + amt else: amt))
         else: discard
-      state.combat = some(cs)
   elif sel.startsWith("enemy."):
     let rawId = sel[6..^1]
     let eid   = if rawId == "self": selfId else: rawId
     let idx   = resolveEnemyIdx(state, eid)
     if idx >= 0 and state.combat.isSome:
-      var cs = state.combat.get
+      let cs = state.combat.get
       case s
       of "health":  cs.enemies[idx].health  = max(0.0, min(cs.enemies[idx].maxHealth,  if relative: cs.enemies[idx].health  + amt else: amt))
       of "stamina": cs.enemies[idx].stamina = max(0.0, min(cs.enemies[idx].staminaMax, if relative: cs.enemies[idx].stamina + amt else: amt))
       of "focus":   cs.enemies[idx].focus   = max(0.0, min(cs.enemies[idx].focusMax,   if relative: cs.enemies[idx].focus   + amt else: amt))
       else: discard
-      state.combat = some(cs)
 
 
 # ── Verb: add_effect ──────────────────────────────────────────────────────────
@@ -239,20 +235,18 @@ proc addEffect*(state: var GameState; selector, effectId: string;
     let eid   = if rawId == "self": selfId else: rawId
     var idx   = resolveEnemyIdx(state, eid)
     if idx < 0: return
-    var cs = state.combat.get
+    let cs = state.combat.get
 
     # Refresh existing (skip dead effects with ticksRemaining == 0)
     for i in 0 ..< cs.enemies[idx].effects.len:
       if cs.enemies[idx].effects[i].id == effectId and cs.enemies[idx].effects[i].ticksRemaining != 0:
         cs.enemies[idx].effects[i].ticksRemaining =
           max(cs.enemies[idx].effects[i].ticksRemaining, duration)
-        state.combat = some(cs)
         return
 
     # New application
     cs.enemies[idx].effects.add ActiveEffect(id: effectId, ticksRemaining: duration)
     let label = cs.enemies[idx].label
-    state.combat = some(cs)
     for cmd in def.onApplyCommands:
       result &= runCommand(state, cmd, eid)
     if def.displayName != "":
@@ -263,7 +257,7 @@ proc addEffect*(state: var GameState; selector, effectId: string;
     if not state.combat.isSome: return
     idx = resolveEnemyIdx(state, eid)
     if idx < 0: return
-    var cs2 = state.combat.get
+    let cs2 = state.combat.get
     result &= cond.checkInteractions(state, cs2.enemies[idx].effects,
                                      "enemy." & eid, effectId)
     # First tick — re-find effect by id inside the re-resolved enemy slot
@@ -275,7 +269,7 @@ proc addEffect*(state: var GameState; selector, effectId: string;
         if state.combat.isSome:
           let idx3 = resolveEnemyIdx(state, eid)
           if idx3 >= 0:
-            var cs3 = state.combat.get
+            let cs3 = state.combat.get
             for j in 0 ..< cs3.enemies[idx3].effects.len:
               if cs3.enemies[idx3].effects[j].id == effectId:
                 cs3.enemies[idx3].effects[j].ticksRemaining =
@@ -284,7 +278,6 @@ proc addEffect*(state: var GameState; selector, effectId: string;
                   for cmd in def.onExpireCommands:
                     result &= runCommand(state, cmd, eid)
                   cs3.enemies[idx3].effects.delete(j)
-                state.combat = some(cs3)
                 break
         break
 
@@ -309,7 +302,7 @@ proc removeEffect(state: var GameState; sel, selfId, effectId: string): seq[stri
     let eid   = if rawId == "self": selfId else: rawId
     let idx   = resolveEnemyIdx(state, eid)
     if idx >= 0:
-      var cs = state.combat.get
+      let cs = state.combat.get
       var removed = 0
       for i in 0 ..< cs.enemies[idx].effects.len:
         if cs.enemies[idx].effects[i].id == effectId and cs.enemies[idx].effects[i].ticksRemaining != 0:
@@ -317,7 +310,6 @@ proc removeEffect(state: var GameState; sel, selfId, effectId: string): seq[stri
           removed.inc
       if removed > 0:
         result.add &"  {cs.enemies[idx].label}: {effectId} removed."
-      state.combat = some(cs)
 
 
 # ── Verb: give ────────────────────────────────────────────────────────────────

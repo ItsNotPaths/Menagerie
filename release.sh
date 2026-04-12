@@ -6,22 +6,29 @@ PROJECT_DIR="$(cd "$(dirname "$0")" && pwd)"
 # ── Usage ─────────────────────────────────────────────────────────────────────
 
 usage() {
-    echo "Usage: release.sh [--local] [--public] [--version vX.Y.Z] [--notes \"...\"]"
+    echo "Usage: release.sh [--local [--game] [--manager] [--tools]] [--public] [--version vX.Y.Z] [--notes \"...\"]"
     echo ""
-    echo "  --local           Debug build: runs docker-build/build.sh --release locally."
-    echo "                    Uses Docker + Ubuntu 20.04 container. Never used for shipping."
+    echo "  --local           Debug build: runs docker-build/build.sh locally via Docker."
+    echo "                    Without subflags, builds all three targets (--release)."
+    echo "    --game          Only compile the game binary."
+    echo "    --manager       Only compile the mod manager."
+    echo "    --tools         Only compile the world_tools applet."
     echo "  --public          Trigger a GitHub Actions build+release on GH infrastructure."
     echo "                    Requires --version. Watches the run live in the terminal."
     echo "  --version vX.Y.Z  Version tag for the GitHub Release (required with --public)"
     echo "  --notes \"...\"     Release notes body (optional, used with --public)"
     echo ""
     echo "Flags are composable: release.sh --local --public --version v1.0.0"
+    echo "                      release.sh --local --game --manager"
 }
 
 # ── Parse flags ───────────────────────────────────────────────────────────────
 
 DO_LOCAL=false
 DO_PUBLIC=false
+LOCAL_GAME=false
+LOCAL_MANAGER=false
+LOCAL_TOOLS=false
 VERSION=""
 NOTES=""
 
@@ -33,6 +40,9 @@ fi
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --local)   DO_LOCAL=true ;;
+        --game)    LOCAL_GAME=true ;;
+        --manager) LOCAL_MANAGER=true ;;
+        --tools)   LOCAL_TOOLS=true ;;
         --public)  DO_PUBLIC=true ;;
         --version) VERSION="${2:-}"; shift ;;
         --notes)   NOTES="${2:-}"; shift ;;
@@ -61,8 +71,15 @@ fi
 # shipping. Public releases are built on GitHub Actions.
 
 if $DO_LOCAL; then
-    echo "==> [local] Running docker-build/build.sh --release..."
-    "$PROJECT_DIR/docker-build/build.sh" --release
+    LOCAL_ARGS=()
+    $LOCAL_GAME    && LOCAL_ARGS+=(--game)
+    $LOCAL_MANAGER && LOCAL_ARGS+=(--manager)
+    $LOCAL_TOOLS   && LOCAL_ARGS+=(--tools)
+    if [[ ${#LOCAL_ARGS[@]} -eq 0 ]]; then
+        LOCAL_ARGS=(--release)
+    fi
+    echo "==> [local] Running docker-build/build.sh ${LOCAL_ARGS[*]}..."
+    "$PROJECT_DIR/docker-build/build.sh" "${LOCAL_ARGS[@]}"
     echo "==> [local] Done."
 fi
 

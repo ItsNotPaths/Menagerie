@@ -87,6 +87,16 @@ proc takeItem*(state: var GameState; itemId: string): bool =
         if fallback < 0: fallback = i
     if fallback >= 0:
       state.player.inventory.delete(fallback)
+      # Clear the equip slot that was holding this item to prevent dangling refs
+      if state.player.mainhand == itemId:
+        state.player.mainhand = ""
+      elif state.player.offhand == itemId:
+        state.player.offhand = ""
+      else:
+        for k in state.player.armor.keys:
+          if state.player.armor[k] == itemId:
+            state.player.armor[k] = ""
+            break
       return true
     return false
   for i in 0 ..< state.player.inventory.len:

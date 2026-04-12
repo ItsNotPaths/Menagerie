@@ -98,7 +98,7 @@ type
     turns*:    int     ## rounds until expiry if never triggered (0 = expires this round)
 
 
-  CombatState* = object
+  CombatState* = ref object
     enemies*:          seq[CombatEnemy]
     round*:            int
     lastResult*:       string     ## "hit" | "kill" | "stagger" | "flee"

@@ -17,7 +17,8 @@ import engine/saves
 type
   CmdResult* = object
     lines*:       seq[string]   ## text output for the scrollback
-    imagePath*:   string        ## load this image into the left panel ("" = no change)
+    imagePath*:   string        ## load this image into the left panel from a file path
+    imageData*:   seq[byte]     ## load this image from in-memory bytes (preferred over imagePath)
     ticks*:       int           ## ticks consumed (0 = no time passes)
     panelLines*:  seq[string]   ## replace right panel with these lines (empty = no change)
     panelAppend*: bool          ## append panelLines instead of replacing

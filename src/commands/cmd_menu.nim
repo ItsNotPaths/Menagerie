@@ -46,8 +46,8 @@ proc cmdLoad(state: var GameState; args: seq[string]): CmdResult =
   if args.len == 0:
     let sl = saves.listSaves()
     var lines = @["Load which save? (type: load <name>)", ""]
-    for e in sl.auto:   lines.add &"  [[load {e.name}:{e.display}]]"
-    for e in sl.manual: lines.add &"  [[load {e.name}:{e.display}]]"
+    for e in sl.auto:   lines.add &"  [[{e.display}:load {e.name}]]"
+    for e in sl.manual: lines.add &"  [[{e.display}:load {e.name}]]"
     if sl.auto.len == 0 and sl.manual.len == 0:
       lines.add "  (no saves found)"
     return ok(lines)

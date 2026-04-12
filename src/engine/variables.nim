@@ -11,13 +11,14 @@
 ##   Ops: set  add  sub
 
 import std/[json, strutils, tables]
+import log
 
 proc evalConditions*(conditions: seq[JsonNode]; variables: Table[string, JsonNode]): bool =
   ## Returns true when every condition passes (AND). Empty list always passes.
   for c in conditions:
-    let varName = c["var"].getStr
+    let varName = c{"var"}.getStr
     let op      = if c.hasKey("op"): c["op"].getStr else: "eq"
-    let target  = c["value"]
+    let target  = c{"value"}
     let val     = if varName in variables: variables[varName] else: newJNull()
 
     case op
@@ -54,7 +55,9 @@ proc evalConditionStr*(cond: string; variables: Table[string, JsonNode]): bool =
     for op in [">", "<", "="]:
       let i = s.find(op)
       if i >= 0: opStr = op; sepIdx = i; break
-  if sepIdx < 0: return true  # no operator found
+  if sepIdx < 0:
+    log(Game, Warn, "evalConditionStr: no operator found in condition: " & cond)
+    return false
   let varName = s[0 ..< sepIdx].strip()
   let rhs     = s[sepIdx + opStr.len .. ^1].strip()
   let val     = variables.getOrDefault(varName, newJNull())
@@ -77,7 +80,7 @@ proc evalConditionStr*(cond: string; variables: Table[string, JsonNode]): bool =
 proc applyChanges*(changes: seq[JsonNode]; variables: var Table[string, JsonNode]) =
   ## Apply a list of variable changes to the variables table in-place.
   for c in changes:
-    let key = c["var"].getStr
+    let key = c{"var"}.getStr
     let op  = if c.hasKey("op"): c["op"].getStr else: "set"
     let val = c["value"]
     case op

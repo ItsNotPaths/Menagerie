@@ -12,7 +12,7 @@
 ## Topic links embed the npcId so no session state is required.
 ## Condition / change format: see engine/variables.nim
 
-import std/[json, re, strformat, strutils, tables]
+import std/[json, strformat, strutils, tables]
 import state
 import content
 import variables as vars
@@ -21,12 +21,26 @@ import api_types
 
 # ── Link rendering ────────────────────────────────────────────────────────────
 
-let topicLinkRe = re(r"\[\[([^\]:\[]+):([^\]]+)\]\]")
-
 proc renderLinks(text, npcId: string): string =
   ## Rewrite [[display:topic_id]] → [[display:say npcId topic_id]] so the UI
   ## fires the right command on click.  Plain [[cmd]] tokens are unchanged.
-  result = text.replacef(topicLinkRe, "[[$1:say " & npcId & " $2]]")
+  result = text
+  var i = 0
+  while true:
+    let start = result.find("[[", i)
+    if start < 0: break
+    let stop = result.find("]]", start + 2)
+    if stop < 0: break
+    let inner = result[start + 2 ..< stop]
+    let colon = inner.find(':')
+    if colon >= 0:
+      let label   = inner[0 ..< colon]
+      let topicId = inner[colon + 1 .. ^1]
+      let repl    = "[[" & label & ":say " & npcId & " " & topicId & "]]"
+      result = result[0 ..< start] & repl & result[stop + 2 .. ^1]
+      i = start + repl.len
+    else:
+      i = start + 2
 
 
 # ── Topic list ────────────────────────────────────────────────────────────────

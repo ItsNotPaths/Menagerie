@@ -50,9 +50,8 @@ type EconEventMode* = enum
 
 # ── Economic event helpers ────────────────────────────────────────────────────
 
-proc activeEvents(state: var GameState): JsonNode =
-  ## Return the list of active economic events, lazily expiring any that have
-  ## exceeded their tick_scope.  Always returns a JArray (possibly empty).
+proc pruneExpiredEvents*(state: var GameState) =
+  ## Remove economic events that have exceeded their tick_scope.
   var evList = state.variables.getOrDefault("_active_economic_events", newJArray())
   if evList.kind != JArray: evList = newJArray()
   var kept = newJArray()
@@ -61,7 +60,12 @@ proc activeEvents(state: var GameState): JsonNode =
     if elapsed < ev{"tick_scope"}.getInt(0):
       kept.add ev
   state.variables["_active_economic_events"] = kept
-  kept
+
+proc getActiveEvents(state: GameState): JsonNode =
+  ## Return the current active economic event list (read-only, no pruning).
+  ## Call pruneExpiredEvents first to keep the list current.
+  let evList = state.variables.getOrDefault("_active_economic_events", newJArray())
+  if evList.kind == JArray: evList else: newJArray()
 
 type TradeDir* = enum tdBuy, tdSell
 
@@ -80,12 +84,13 @@ proc calcTradePrice(state: GameState; baseCost: int; dir: TradeDir): int =
     of tdSell: "sell_price_pct"
   result = max(1, int(round(result.float * mods.modifierGet(state, modKey))))
 
-proc adjustedCost*(state: var GameState; itemId: string; baseCost: int;
+proc adjustedCost*(state: GameState; itemId: string; baseCost: int;
                    dir: TradeDir): int =
   ## Final trade price: mercantile + modifier, then additive economic events.
   ## Event fluctuations are summed (not chained) before applying to the price.
+  ## Call pruneExpiredEvents before a shop session to keep the event list fresh.
   result = calcTradePrice(state, baseCost, dir)
-  let evList = activeEvents(state)
+  let evList = getActiveEvents(state)
   if evList.len == 0: return
   var itemTags: seq[string]
   if itemId in content.items:
@@ -116,7 +121,8 @@ proc applyEconomicEvent*(state: var GameState; eventId: string;
   ##   eemExtend  — add the event's tick_scope to its remaining ticks
   if eventId notin content.economicEvents: return
   let def  = content.economicEvents[eventId]
-  let evList = activeEvents(state)   # also flushes expired entries
+  pruneExpiredEvents(state)
+  let evList = getActiveEvents(state)
   ## Check if this event is already running
   for i in 0 ..< evList.len:
     if evList[i]{"id"}.getStr == eventId:
@@ -190,6 +196,7 @@ proc openShop*(state: var GameState; shopId: string): seq[string] =
   if shopId notin content.shops:
     return @[&"(Shop '{shopId}' not found.)"]
   state.variables["_active_shop"] = %shopId
+  pruneExpiredEvents(state)
   shopLines(state)
 
 

@@ -29,7 +29,8 @@ type
       line*: string
       tag*:  string         ## reserved for colour tags (unused in Phase 3)
     of umLoadLocation:
-      imgPath*: string
+      imgPath*: string       ## file path to load from (empty when imgData is used)
+      imgData*: seq[byte]    ## in-memory PNG bytes; preferred over imgPath when non-empty
     of umRenderSprites:
       sprites*: seq[SpriteEntry]
     of umStats:

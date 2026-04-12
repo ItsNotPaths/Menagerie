@@ -19,7 +19,7 @@ proc cmdListClasses(state: var GameState; args: seq[string]): CmdResult =
   for id in ids:
     let cd = content.classes[id]
     let name = if cd.displayName != "": cd.displayName else: id
-    lines.add &"  [[choose {id}:{name}]]"
+    lines.add &"  [[{name}:choose {id}]]"
     if cd.description != "":
       lines.add &"    {cd.description}"
     lines.add ""

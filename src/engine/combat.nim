@@ -55,7 +55,7 @@ proc runEnemyPhase(state: var GameState): (seq[string], seq[string]) =
   if not state.combat.isSome: return
   var attacking: seq[string]
   var narration: seq[string]
-  var cs = state.combat.get
+  let cs = state.combat.get
 
   for i in 0..<cs.enemies.len:
     if cs.enemies[i].anchored > 0:
@@ -119,7 +119,6 @@ proc runEnemyPhase(state: var GameState): (seq[string], seq[string]) =
       narration.add &"    -> row {cs.enemies[i].row}, dist {cs.enemies[i].distance}"
       narration.add COMBAT_PAUSE
 
-  state.combat = some(cs)
   (attacking, narration)
 
 
@@ -127,7 +126,7 @@ proc runEnemyPhase(state: var GameState): (seq[string], seq[string]) =
 
 proc fireTraps(state: var GameState): seq[string] =
   if not state.combat.isSome: return
-  var cs = state.combat.get
+  let cs = state.combat.get
   var survivors: seq[CombatTrap]
 
   for trap in cs.traps:
@@ -138,19 +137,16 @@ proc fireTraps(state: var GameState): seq[string] =
       if hits.len > 0:
         result.add &"  Trap fires — {t.spellId}:"
         let spDef = content.getSpell(t.spellId)
-        state.combat = some(cs)
         for e in hits:
           result &= api.cmdDamage(state, "enemy." & e.id, e.id, t.strength, "health")
         if spDef.id != "":
           result &= sp.applySpellEffects(state, spDef,hits.mapIt(it.id))
-        if state.combat.isSome: cs = state.combat.get
       else:
         result.add &"  Trap at ({t.row},{t.distance}) expires — no target."
     else:
       survivors.add t
 
   cs.traps = survivors
-  state.combat = some(cs)
 
 
 include "combat_display.nim"
@@ -260,12 +256,11 @@ proc applyNemesis(state: var GameState; enemyId: string): string =
     saves.flushNpcStates(state)
   # Update label in active combat
   if state.combat.isSome:
-    var cs = state.combat.get
+    let cs = state.combat.get
     for i in 0..<cs.enemies.len:
       if cs.enemies[i].id == enemyId:
         cs.enemies[i].label = newLabel
         break
-    state.combat = some(cs)
   newLabel
 
 
@@ -315,9 +310,8 @@ proc beginRound(state: var GameState): seq[string] =
   ## Start a new round: regen -> tick effects -> traps -> enemy phase ->
   ## show positions and action options.
   if not state.combat.isSome: return
-  var cs = state.combat.get
+  let cs = state.combat.get
   inc cs.round
-  state.combat = some(cs)
 
   # ── Regen ─────────────────────────────────────────────────────────────────
   let regenS = gvFloat("player_regen_stamina", 20.0)
@@ -333,11 +327,10 @@ proc beginRound(state: var GameState): seq[string] =
   state.player.spellCooldowns = newCooldowns
   # Enemy regen
   if state.combat.isSome:
-    var cs2 = state.combat.get
+    let cs2 = state.combat.get
     for i in 0..<cs2.enemies.len:
       cs2.enemies[i].stamina = min(cs2.enemies[i].staminaMax, cs2.enemies[i].stamina + cs2.enemies[i].staminaRegen)
       cs2.enemies[i].focus   = min(cs2.enemies[i].focusMax,   cs2.enemies[i].focus   + cs2.enemies[i].focusRegen)
-    state.combat = some(cs2)
 
   result.add &"-- Round {state.combat.get.round} ------------------------------"
 
@@ -352,11 +345,10 @@ proc beginRound(state: var GameState): seq[string] =
     let enemyCount = state.combat.get.enemies.len
     for i in 0..<enemyCount:
       if not state.combat.isSome: break
-      var cs3 = state.combat.get
+      let cs3 = state.combat.get
       if i >= cs3.enemies.len: break
       let eid = cs3.enemies[i].id
       var effs = cs3.enemies[i].effects
-      state.combat = some(cs3)
       let effLines = cond.tickEffects(state, effs, "enemy." & eid,
                                      cs3.enemies[i].data{"resistances"})
       for ln in effLines:
@@ -364,16 +356,15 @@ proc beginRound(state: var GameState): seq[string] =
         result.add COMBAT_PAUSE
       # Write effects back by id (health changes went through cmdDamage independently)
       if state.combat.isSome:
-        var cs4 = state.combat.get
+        let cs4 = state.combat.get
         for j in 0..<cs4.enemies.len:
           if cs4.enemies[j].id == eid:
             cs4.enemies[j].effects = effs
             break
-        state.combat = some(cs4)
 
   # ── Deaths from effect ticks ───────────────────────────────────────────────
   if state.combat.isSome:
-    var cs5 = state.combat.get
+    let cs5 = state.combat.get
     let effectKilled = cs5.enemies.filterIt(it.health <= 0)
     for e in effectKilled:
       result.add &"  {e.label} succumbs to their wounds."
@@ -384,10 +375,8 @@ proc beginRound(state: var GameState): seq[string] =
         result.add &"    Dropped: {lootSummary(dropped)}"
         result.add COMBAT_PAUSE
     if state.combat.isSome:
-      var cs6 = state.combat.get
-      cs6.enemies.keepIf(proc(e: CombatEnemy): bool = e.health > 0)
-      state.combat = some(cs6)
-      if cs6.enemies.len == 0:
+      cs5.enemies.keepIf(proc(e: CombatEnemy): bool = e.health > 0)
+      if cs5.enemies.len == 0:
         result.add ""
         result &= endCombat(state)
         return
@@ -398,7 +387,7 @@ proc beginRound(state: var GameState): seq[string] =
     result.add ln
     result.add COMBAT_PAUSE
   if trapLines.len > 0 and state.combat.isSome:
-    var cs7 = state.combat.get
+    let cs7 = state.combat.get
     let trapKilled = cs7.enemies.filterIt(it.health <= 0)
     for e in trapKilled:
       result.add &"  {e.label} destroyed by trap."
@@ -409,7 +398,6 @@ proc beginRound(state: var GameState): seq[string] =
         result.add &"    Dropped: {lootSummary(dropped)}"
         result.add COMBAT_PAUSE
     cs7.enemies.keepIf(proc(e: CombatEnemy): bool = e.health > 0)
-    state.combat = some(cs7)
     if cs7.enemies.len == 0:
       result.add ""
       result &= endCombat(state)
@@ -586,10 +574,9 @@ proc doAttack*(state: var GameState): seq[string] =
     return @[&"Not enough stamina to attack. ({int(state.player.stamina)} / {int(totalCost)} needed)"]
 
   state.player.stamina -= totalCost
-  var cs = state.combat.get
+  let cs = state.combat.get
   cs.playerLastAction = "attack"
   cs.pendingAction    = %*{"type": "attack", "damages": damages}
-  state.combat = some(cs)
   result.add "You ready your weapon."
   result &= resolveRound(state)
 
@@ -604,10 +591,9 @@ proc doDodge*(state: var GameState): seq[string] =
                              state.player.health + gvFloat("dodge_health_gain", 5.0))
   state.player.focus   = min(clock.effectiveStatCap(state, state.player.maxFocus),
                              state.player.focus  + gvFloat("dodge_focus_gain", 8.0))
-  var cs = state.combat.get
+  let cs = state.combat.get
   cs.dodgeToken       = 1
   cs.playerLastAction = "dodge"
-  state.combat = some(cs)
   result.add "You ready yourself to dodge."
   result &= mods.fireEvent(state, "dodge_chosen", "player")
   result &= resolveRound(state)
@@ -627,19 +613,17 @@ proc doBlock*(state: var GameState): seq[string] =
   let blockReduction = (0.3 + sk.skillPct(state, "block") * 0.4) *
                        mods.modifierGet(state, "block_reduction_pct")
   state.variables["block_reduction"] = %blockReduction
-  var cs = state.combat.get
+  let cs = state.combat.get
   cs.blocking         = true
   cs.playerLastAction = "block"
-  state.combat = some(cs)
   result.add "You brace for impact."
   result &= resolveRound(state)
 
 
 proc doPass*(state: var GameState): seq[string] =
   if not state.combat.isSome: return @["No active combat."]
-  var cs = state.combat.get
+  let cs = state.combat.get
   cs.playerLastAction = "pass"
-  state.combat = some(cs)
   resolveRound(state)
 
 
@@ -671,11 +655,10 @@ proc doCast*(state: var GameState; mode, spellId: string;
                              state.player.health  + gvFloat("cast_health_gain",  5.0))
   state.variables["_last_spell_id"]  = %spellId
   state.variables["_last_cast_mode"] = %mode
-  var cs = state.combat.get
+  let cs = state.combat.get
   cs.playerLastAction = "cast"
   cs.pendingAction    = %*{"type": "cast", "mode": mode, "spell_id": spellId,
                            "row": row, "dist": (if dist.isSome: dist.get else: -1)}
-  state.combat = some(cs)
   result.add &"You prepare to cast {spellId} ({mode})."
   result &= mods.fireEvent(state, "spell_cast", "player")
   result &= resolveRound(state)
@@ -683,10 +666,9 @@ proc doCast*(state: var GameState; mode, spellId: string;
 
 proc doAuxSpell*(state: var GameState; aux: string; args: seq[string]): seq[string] =
   if not state.combat.isSome: return @["No active combat."]
-  var cs = state.combat.get
+  let cs = state.combat.get
   cs.playerLastAction = "cast"
   cs.pendingAction    = %*{"type": "aux", "aux": aux, "args": args}
-  state.combat = some(cs)
   resolveRound(state)
 
 
@@ -694,7 +676,7 @@ proc doAuxSpell*(state: var GameState; aux: string; args: seq[string]): seq[stri
 
 proc applyAux(state: var GameState; aux: string; args: seq[string]): seq[string] =
   if not state.combat.isSome: return @[&"No active combat for aux '{aux}'."]
-  var cs = state.combat.get
+  let cs = state.combat.get
 
   case aux
   of "push":
@@ -705,7 +687,6 @@ proc applyAux(state: var GameState; aux: string; args: seq[string]): seq[string]
       if cs.enemies[i].row == row:
         cs.enemies[i].distance = min(9, cs.enemies[i].distance + gvInt("push_distance", 5))
         targets.add cs.enemies[i].label
-    state.combat = some(cs)
     if targets.len == 0: return @[&"No enemies on row {row}."]
     return @[&"You push row {row} — {targets.join(\", \")} hurled back."]
 
@@ -719,11 +700,9 @@ proc applyAux(state: var GameState; aux: string; args: seq[string]): seq[string]
           closest = i
     if closest < 0: return @[&"No enemies on row {row}."]
     if cs.enemies[closest].distance == 1:
-      state.combat = some(cs)
       return @[&"{cs.enemies[closest].label} is already at melee range — pull has no effect."]
     cs.enemies[closest].distance = gvInt("pull_target_distance", 2)
     let lbl = cs.enemies[closest].label
-    state.combat = some(cs)
     return @[&"You pull {lbl} to distance {cs.enemies[closest].distance}."]
 
   of "scatter":
@@ -738,7 +717,6 @@ proc applyAux(state: var GameState; aux: string; args: seq[string]): seq[string]
         if opts.len > 0:
           cs.enemies[i].row = opts[rand(opts.len - 1)]
           moved.add &"  {cs.enemies[i].label} -> row {cs.enemies[i].row}"
-    state.combat = some(cs)
     if moved.len == 0: return @[&"No enemies on row {row}."]
     return @[&"You scatter row {row}:"] & moved
 
@@ -750,7 +728,6 @@ proc applyAux(state: var GameState; aux: string; args: seq[string]): seq[string]
     if idx < 0: return @[&"No enemy at row {row}, dist {dist}."]
     cs.enemies[idx].anchored = gvInt("pin_duration", 2)
     let lbl = cs.enemies[idx].label
-    state.combat = some(cs)
     return @[&"You pin {lbl} in place."]
 
   of "swap":
@@ -765,7 +742,6 @@ proc applyAux(state: var GameState; aux: string; args: seq[string]): seq[string]
     let lblA = cs.enemies[ia].label; let lblB = cs.enemies[ib].label
     cs.enemies[ia].row = r2; cs.enemies[ia].distance = d2
     cs.enemies[ib].row = r1; cs.enemies[ib].distance = d1
-    state.combat = some(cs)
     return @[&"You swap {lblA} and {lblB}."]
 
   of "bind":
@@ -778,7 +754,6 @@ proc applyAux(state: var GameState; aux: string; args: seq[string]): seq[string]
     let lblA = cs.enemies[ia].label; let lblB = cs.enemies[ib].label
     cs.enemies[ia].row = midRow; cs.enemies[ia].distance = midDist
     cs.enemies[ib].row = midRow; cs.enemies[ib].distance = midDist
-    state.combat = some(cs)
     return @[&"You bind {lblA} and {lblB} at row {midRow}, dist {midDist}."]
 
   else:
@@ -789,10 +764,9 @@ proc applyAux(state: var GameState; aux: string; args: seq[string]): seq[string]
 
 proc firePendingAction(state: var GameState): seq[string] =
   if not state.combat.isSome: return
-  var cs = state.combat.get
+  let cs = state.combat.get
   let pa = cs.pendingAction
   cs.pendingAction = newJNull()
-  state.combat = some(cs)
   if pa == nil or pa.kind == JNull: return
 
   let paType = pa{"type"}.getStr
@@ -847,10 +821,9 @@ proc firePendingAction(state: var GameState): seq[string] =
     if mode == "trap":
       let strength = baseDmg * mult
       if state.combat.isSome:
-        var cs3 = state.combat.get
+        let cs3 = state.combat.get
         cs3.traps.add CombatTrap(row: row, distance: distVal, spellId: spellId,
                                  strength: strength, turns: gvInt("trap_turn_delay", 1))
-        state.combat = some(cs3)
       result.add &"You set a {spellId} trap at row {row}, dist {distVal}."
     else:
       if not state.combat.isSome: return
@@ -901,10 +874,9 @@ proc resolveRound(state: var GameState): seq[string] =
   let (attackingIds, enemyNarration) = runEnemyPhase(state)
   # Decrement anchor counts
   if state.combat.isSome:
-    var cs = state.combat.get
+    let cs = state.combat.get
     for i in 0..<cs.enemies.len:
       if cs.enemies[i].anchored > 0: dec cs.enemies[i].anchored
-    state.combat = some(cs)
   result.add ""
   result &= enemyNarration
 
@@ -918,7 +890,7 @@ proc resolveRound(state: var GameState): seq[string] =
 
   # ── Enemy attacks land ────────────────────────────────────────────────────
   if not state.combat.isSome: return
-  var cs = state.combat.get
+  let cs = state.combat.get
   let blocking   = cs.blocking
   var killerId   = ""
 
@@ -931,13 +903,11 @@ proc resolveRound(state: var GameState): seq[string] =
 
     if cs.dodgeToken > 0:
       dec cs.dodgeToken
-      state.combat = some(cs)
       state.variables["_last_dodge_damage_avoided"] = %rawDmg
       let dodgeEv = mods.fireEvent(state, "dodge_consumed", e.id)
       result.add &"  {e.label}'s strike — you dodge it cleanly."
       for ln in dodgeEv: result.add &"    -> {ln.strip}"
       result.add COMBAT_PAUSE
-      if state.combat.isSome: cs = state.combat.get
       continue
 
     let strikeLine =
@@ -974,13 +944,10 @@ proc resolveRound(state: var GameState): seq[string] =
     if state.player.health <= 0 and hpBefore > 0:
       killerId = e.id
 
-    if state.combat.isSome: cs = state.combat.get
-
   # Clear per-round flags
   cs.dodgeToken    = 0
   cs.blocking      = false
   cs.pendingAction = newJNull()
-  state.combat = some(cs)
 
   # ── Player death ──────────────────────────────────────────────────────────
   if state.player.health <= 0:
@@ -992,7 +959,7 @@ proc resolveRound(state: var GameState): seq[string] =
 
   # ── Enemy deaths ──────────────────────────────────────────────────────────
   if state.combat.isSome:
-    var cs2 = state.combat.get
+    let cs2 = state.combat.get
     let killed = cs2.enemies.filterIt(it.health <= 0)
     for e in killed:
       result.add &"  {e.label} is dead."
@@ -1003,7 +970,6 @@ proc resolveRound(state: var GameState): seq[string] =
         result.add &"    Dropped: {lootSummary(dropped)}"
         result.add COMBAT_PAUSE
     cs2.enemies.keepIf(proc(e: CombatEnemy): bool = e.health > 0)
-    state.combat = some(cs2)
 
   if not state.combat.isSome or state.combat.get.enemies.len == 0:
     result.add ""
@@ -1052,7 +1018,7 @@ proc doFlee*(state: var GameState): seq[string] =
   state.player.stamina -= fleeCost
 
   # Persist enemy positions before clearing combat
-  var cs = state.combat.get
+  let cs = state.combat.get
   for e in cs.enemies:
     if e.id in state.npcStates and state.npcStates[e.id].kind == JObject:
       state.npcStates[e.id]["health"]   = %e.health

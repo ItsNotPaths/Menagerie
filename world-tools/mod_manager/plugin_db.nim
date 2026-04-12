@@ -118,7 +118,8 @@ proc scan*(modpackDir: string): PluginDb =
         e.enabled     = meta.getOrDefault("enabled").getBool(true)
         e.recordCount = countRecords(raw)
         found[fpath]  = e
-      except: discard
+      except:
+        stderr.writeLine("plugin scan: " & fpath & ": " & getCurrentExceptionMsg())
 
   # Dedicated assets plugins: <modpackDir>/assets/<pluginDir>/meta.json (flat format)
   # Key is the plugin folder path (not the meta.json path) for order-file compatibility.
@@ -139,7 +140,8 @@ proc scan*(modpackDir: string): PluginDb =
         e.isMaster = raw.getOrDefault("is_master").getBool(false)
         e.enabled  = raw.getOrDefault("enabled").getBool(true)
         found[pluginDir] = e
-      except: discard
+      except:
+        stderr.writeLine("plugin scan: " & metaPath & ": " & getCurrentExceptionMsg())
 
   # Apply saved load order; append any newly discovered plugins at the end
   for tid in TOOL_IDS:

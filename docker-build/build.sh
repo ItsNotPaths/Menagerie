@@ -69,10 +69,13 @@ if $BUILD_GAME || $BUILD_MANAGER || $BUILD_TOOLS; then
 fi
 
 # ── Helper: fix ownership after container run ─────────────────────────────────
-# Containers run as root; the output file comes out owned by root.
+# Containers run as root; the output file comes out root-owned.
+# chown is best-effort: skipped silently when sudo requires a TTY (e.g. local
+# non-interactive shells).  The binary is world-readable/executable (755) so
+# ldd, cp, and rm all work correctly regardless of ownership.
 
 fix_owner() {
-    sudo chown "$(id -u):$(id -g)" "$1"
+    sudo chown "$(id -u):$(id -g)" "$1" 2>/dev/null || true
 }
 
 # ── Helper: verify no SDL2 dynamic dependency ─────────────────────────────────
@@ -110,8 +113,9 @@ if $BUILD_GAME; then
 
     echo "==> [game] Copying to release directory..."
     mkdir -p "$RELEASE_DIR"
-    cp    "$PROJECT_DIR/menagerie"   "$RELEASE_DIR/menagerie"
-    rm    "$PROJECT_DIR/menagerie"
+    rm -f  "$RELEASE_DIR/menagerie"
+    cp     "$PROJECT_DIR/menagerie"   "$RELEASE_DIR/menagerie"
+    rm     "$PROJECT_DIR/menagerie"
 
     echo "==> [game] Done: $RELEASE_DIR/menagerie"
 fi

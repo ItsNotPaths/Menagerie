@@ -9,6 +9,7 @@
 import std/[os, times, locks, strutils]
 
 const MaxLines = 1000
+const TrimLines = 500
 
 type
   LogTarget* = enum Game, Manager, Tools
@@ -49,9 +50,13 @@ proc log*(target: LogTarget; level: LogLevel; msg: string) {.gcsafe.} =
     withLock gLock:
       if gPaths[target] == "": return
       gLines[target].add(line)
-      if gLines[target].len > MaxLines:
-        gLines[target] = gLines[target][gLines[target].len - MaxLines .. ^1]
       try:
-        writeFile(gPaths[target], gLines[target].join("\n") & "\n")
+        if gLines[target].len > MaxLines:
+          gLines[target] = gLines[target][gLines[target].len - TrimLines .. ^1]
+          writeFile(gPaths[target], gLines[target].join("\n") & "\n")
+        else:
+          let f = open(gPaths[target], fmAppend)
+          f.writeLine(line)
+          f.close()
       except CatchableError as e:
         stderr.writeLine("log write failed (" & gPaths[target] & "): " & e.msg)

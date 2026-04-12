@@ -446,6 +446,24 @@ proc loadBgImage(app: var App; path: string) =
   app.bgTex = app.ren.createTextureFromSurface(surf)
   freeSurface(surf)
 
+proc loadBgImageData(app: var App; data: seq[byte]) =
+  if app.bgTex != nil:
+    destroyTexture(app.bgTex)
+    app.bgTex = nil
+  if data.len == 0: return
+  let rw = rwFromConstMem(unsafeAddr data[0], data.len.cint)
+  if rw.isNil:
+    log(Game, Error, "rwFromConstMem failed for survey image")
+    return
+  let surf = image.load_RW(rw, 1)   # freesrc=1 closes and frees rw
+  if surf.isNil:
+    log(Game, Error, "Image load from memory failed: " & $getError())
+    return
+  app.bgW = surf.w.int
+  app.bgH = surf.h.int
+  app.bgTex = app.ren.createTextureFromSurface(surf)
+  freeSurface(surf)
+
 proc recomputeBgRect(app: var App) =
   ## Scale image to window height (aspect preserved), centre within right panel.
   ## Overflow left/right is cropped by the clip rect in renderRightPanel.
@@ -636,7 +654,10 @@ proc main*() =
         app.buf.addLine(msg.line)
         dirtyBuf = true
       of umLoadLocation:
-        app.loadBgImage(msg.imgPath)
+        if msg.imgData.len > 0:
+          app.loadBgImageData(msg.imgData)
+        elif msg.imgPath != "":
+          app.loadBgImage(msg.imgPath)
         app.recomputeBgRect()
       of umStats:
         app.hudStats = @[]

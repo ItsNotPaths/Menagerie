@@ -234,18 +234,18 @@ proc getNpcRoom(npc: JsonNode; tileId: string; currentTick: int; defaultRoom: st
   # Find the highest-tick entry that does not exceed dayT
   var bestTick = -1
   var bestRoom = defaultRoom
-  var wrapTick = -1
-  var wrapRoom = defaultRoom
+  var lastTick = -1
+  var lastRoom = defaultRoom
   for entry in tileSchedule:
     let t = entry{"tick"}.getInt(-1)
     let r = entry{"room"}.getStr
-    if t > wrapTick:
-      wrapTick = t
-      wrapRoom = r
+    if t > lastTick:
+      lastTick = t
+      lastRoom = r
     if t <= dayT and t > bestTick:
       bestTick = t
       bestRoom = r
-  if bestTick < 0: wrapRoom else: bestRoom
+  if bestTick < 0: lastRoom else: bestRoom
 
 
 # ── Tile entry room resolution ────────────────────────────────────────────────

@@ -26,3 +26,6 @@ optimize.sh
 
 # graphify
 graphify-out/
+
+# review doc
+codebase-report.md
