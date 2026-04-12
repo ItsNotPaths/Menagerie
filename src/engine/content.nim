@@ -26,6 +26,7 @@ type
     id*, displayName*, castType*, description*: string
     damage*, focusCost*:                        float
     duration*, tickCooldown*:                   int
+    value*:                                     int
     onHitCommands*:                             seq[string]
     effects*:                                   JsonNode   ## [{effect: id, ticks: N}]
 
@@ -74,6 +75,7 @@ type
 
   PerkDef* = object
     id*, displayName*, description*: string
+    value*:                          int
     modifiers*:                      JsonNode   ## {modifier_key: float_value}
     raw*:                            JsonNode   ## full JSON (on_<event>, effect_procs)
 
@@ -212,6 +214,7 @@ proc loadSpells(dir: string) =
       focusCost:     d{"focus_cost"}.getFloat(0),
       duration:      d{"duration"}.getInt(0),
       tickCooldown:  d{"tick_cooldown"}.getInt(0),
+      value:         d{"value"}.getInt(0),
       onHitCommands: strSeq(d{"on_hit_commands"}),
       effects:       if d.hasKey("effects"): d["effects"] else: newJArray(),
     )
@@ -245,6 +248,7 @@ proc loadPerks(dir: string) =
       id:          id,
       displayName: d{"display_name"}.getStr(d{"name"}.getStr(id)),
       description: d{"description"}.getStr,
+      value:       d{"value"}.getInt(0),
       modifiers:   if d.hasKey("modifiers"): d["modifiers"] else: newJNull(),
       raw:         d,
     )

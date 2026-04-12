@@ -38,8 +38,12 @@ proc itemType(itemId: string): string =
 
 proc itemValue(itemId: string): int =
   if itemId in content.items: return content.items[itemId].value
-  # TODO: calculate sell price factoring in equipped effects/perks
-  if itemId in content.armorPlates: return content.armorPlates[itemId].value
+  if itemId in content.armorPlates:
+    result = content.armorPlates[itemId].value
+    for perkId in content.armorPlates[itemId].perks:
+      if perkId in content.perks:
+        result += content.perks[perkId].value
+    return
   0
 
 
